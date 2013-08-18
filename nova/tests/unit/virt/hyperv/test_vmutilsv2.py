@@ -16,6 +16,7 @@ import mock
 
 from nova.tests.unit.virt.hyperv import test_vmutils
 from nova.virt.hyperv import constants
+from nova.virt.hyperv import vmutils
 from nova.virt.hyperv import vmutilsv2
 
 
@@ -32,6 +33,7 @@ class VMUtilsV2TestCase(test_vmutils.VMUtilsTestCase):
     _VM_GEN = constants.VM_GEN_2
 
     _VIRTUAL_SYSTEM_TYPE_REALIZED = 'Microsoft:Hyper-V:System:Realized'
+    _FAKE_MONITOR_COUNT = 1
 
     def setUp(self):
         super(VMUtilsV2TestCase, self).setUp()
@@ -260,3 +262,82 @@ class VMUtilsV2TestCase(test_vmutils.VMUtilsTestCase):
 
         ret_val = self._vmutils.get_vm_dvd_disk_paths(self._FAKE_VM_NAME)
         self.assertEqual(mock.sentinel.FAKE_DVD_PATH1, ret_val[0])
+
+    @mock.patch.object(vmutilsv2.VMUtilsV2, '_get_new_resource_setting_data')
+    @mock.patch.object(vmutilsv2.VMUtilsV2, '_add_virt_resource')
+    @mock.patch.object(vmutilsv2.VMUtilsV2, '_modify_virt_resource')
+    @mock.patch.object(vmutilsv2.VMUtilsV2, '_remove_virt_resource')
+    def test_enable_remotefx_video_adapter(self,
+                                           mock_remove_virt_resource,
+                                           mock_modify_virt_resource,
+                                           mock_add_virt_res,
+                                           mock_new_res_setting_data):
+        mock_vm = self._lookup_vm()
+
+        mock_r1 = mock.MagicMock()
+        mock_r1.ResourceSubType = self._vmutils._SYNTH_DISP_CTRL_RES_SUB_TYPE
+
+        mock_r2 = mock.MagicMock()
+        mock_r2.ResourceSubType = self._vmutils._S3_DISP_CTRL_RES_SUB_TYPE
+
+        mock_vm.associators()[0].associators.return_value = [mock_r1, mock_r2]
+
+        self._vmutils._conn.Msvm_Synth3dVideoPool()[0].IsGpuCapable = True
+        self._vmutils._conn.Msvm_Synth3dVideoPool()[0].IsSlatCapable = True
+        self._vmutils._conn.Msvm_Synth3dVideoPool()[0].DirectXVersion = '11.1'
+
+        mock_synth_3d_disp_ctrl_res = mock.MagicMock(
+            MaximumMonitors=self._FAKE_MONITOR_COUNT,
+            MaximumScreenResolution=0)
+        mock_new_res_setting_data.return_value = mock_synth_3d_disp_ctrl_res
+
+        self._vmutils.enable_remotefx_video_adapter(
+            mock.sentinel.fake_vm_name,
+            self._FAKE_MONITOR_COUNT,
+            constants.REMOTEFX_MAX_RES_1024x768)
+
+        mock_remove_virt_resource.assert_called_once_with(mock_r1,
+                                                          mock_vm.path_())
+        mock_new_res_setting_data.assert_called_once_with(
+            self._vmutils._SYNTH_3D_DISP_CTRL_RES_SUB_TYPE,
+            self._vmutils._SYNTH_3D_DISP_ALLOCATION_SETTING_DATA_CLASS)
+        mock_add_virt_res.assert_called_once_with(mock_synth_3d_disp_ctrl_res,
+                                                  mock_vm.path_())
+
+        mock_modify_virt_resource.assert_called_once_with(mock_r2,
+                                                          mock_vm.path_())
+        self.assertEqual(self._vmutils._DISP_CTRL_ADDRESS_DX_11,
+                         mock_r2.Address)
+
+    def test_enable_remotefx_video_adapter_already_configured(self):
+        mock_vm = self._lookup_vm()
+
+        mock_r = mock.MagicMock()
+        mock_r.ResourceSubType = self._vmutils._SYNTH_3D_DISP_CTRL_RES_SUB_TYPE
+
+        mock_vm.associators()[0].associators.return_value = [mock_r]
+
+        self.assertRaises(vmutils.HyperVException,
+                          self._vmutils.enable_remotefx_video_adapter,
+                          mock.sentinel.fake_vm_name, self._FAKE_MONITOR_COUNT,
+                          constants.REMOTEFX_MAX_RES_1024x768)
+
+    def test_enable_remotefx_video_adapter_no_gpu(self):
+        self._lookup_vm()
+
+        self._vmutils._conn.Msvm_Synth3dVideoPool()[0].IsGpuCapable = False
+
+        self.assertRaises(vmutils.HyperVException,
+                          self._vmutils.enable_remotefx_video_adapter,
+                          mock.sentinel.fake_vm_name, self._FAKE_MONITOR_COUNT,
+                          constants.REMOTEFX_MAX_RES_1024x768)
+
+    def test_enable_remotefx_video_adapter_no_slat(self):
+        self._lookup_vm()
+
+        self._vmutils._conn.Msvm_Synth3dVideoPool()[0].IsSlatCapable = False
+
+        self.assertRaises(vmutils.HyperVException,
+                          self._vmutils.enable_remotefx_video_adapter,
+                          mock.sentinel.fake_vm_name, self._FAKE_MONITOR_COUNT,
+                          constants.REMOTEFX_MAX_RES_1024x768)

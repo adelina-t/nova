@@ -21,7 +21,9 @@ from oslo_config import cfg
 from oslo_utils import units
 
 from nova import exception
+from nova.objects import flavor as flavor_obj
 from nova.tests.unit import fake_instance
+from nova.tests.unit.objects import test_flavor
 from nova.tests.unit.virt.hyperv import test_base
 from nova.virt import hardware
 from nova.virt.hyperv import constants
@@ -362,10 +364,12 @@ class VMOpsTestCase(test_base.HyperVBaseTestCase):
     @mock.patch('nova.virt.hyperv.volumeops.VolumeOps'
                 '.attach_volumes')
     @mock.patch.object(vmops.VMOps, '_attach_drive')
-    def _test_create_instance(self, mock_attach_drive, mock_attach_volumes,
+    @mock.patch.object(vmops.VMOps, '_configure_remotefx')
+    def _test_create_instance(self, mock_configure_remotefx,
+                              mock_attach_drive, mock_attach_volumes,
                               fake_root_path, fake_ephemeral_path,
                               enable_instance_metrics,
-                              vm_gen=constants.VM_GEN_1):
+                              vm_gen=constants.VM_GEN_1, remotefx=False):
         mock_vif_driver = mock.MagicMock()
         self._vmops._vif_driver = mock_vif_driver
         self.flags(enable_instance_metrics_collection=enable_instance_metrics,
@@ -374,45 +378,68 @@ class VMOpsTestCase(test_base.HyperVBaseTestCase):
                              'address': mock.sentinel.ADDRESS}
         mock_instance = fake_instance.fake_instance_obj(self.context)
         instance_path = os.path.join(CONF.instances_path, mock_instance.name)
+        flavor = flavor_obj.Flavor(**test_flavor.fake_flavor)
+        if remotefx is True:
+            flavor.extra_specs['hyperv:remotefx'] = "1920x1200,2"
+        mock_instance.flavor = flavor
 
-        self._vmops.create_instance(instance=mock_instance,
-                                    network_info=[fake_network_info],
-                                    block_device_info=mock.sentinel.DEV_INFO,
-                                    root_vhd_path=fake_root_path,
-                                    eph_vhd_path=fake_ephemeral_path,
-                                    vm_gen=vm_gen)
-        self._vmops._vmutils.create_vm.assert_called_once_with(
-            mock_instance.name, mock_instance.memory_mb,
-            mock_instance.vcpus, CONF.hyperv.limit_cpu_features,
-            CONF.hyperv.dynamic_memory_ratio, vm_gen, instance_path,
-            [mock_instance.uuid])
-        expected = []
-        ctrl_type = vmops.VM_GENERATIONS_CONTROLLER_TYPES[vm_gen]
-        ctrl_disk_addr = 0
-        if fake_root_path:
-            expected.append(mock.call(mock_instance.name, fake_root_path,
-                                      0, ctrl_disk_addr, ctrl_type,
-                                      constants.DISK))
-            ctrl_disk_addr += 1
-        if fake_ephemeral_path:
-            expected.append(mock.call(mock_instance.name,
-                                      fake_ephemeral_path, 0, ctrl_disk_addr,
-                                      ctrl_type, constants.DISK))
-        mock_attach_drive.has_calls(expected)
-        self._vmops._vmutils.create_scsi_controller.assert_called_once_with(
-            mock_instance.name)
+        if remotefx is True and vm_gen == constants.VM_GEN_2:
+            self.assertRaises(vmutils.HyperVException,
+                              self._vmops.create_instance,
+                              instance=mock_instance,
+                              network_info=[fake_network_info],
+                              block_device_info=mock.sentinel.DEV_INFO,
+                              root_vhd_path=fake_root_path,
+                              eph_vhd_path=fake_ephemeral_path,
+                              vm_gen=vm_gen)
+        else:
+            self._vmops.create_instance(
+                instance=mock_instance,
+                network_info=[fake_network_info],
+                block_device_info=mock.sentinel.DEV_INFO,
+                root_vhd_path=fake_root_path,
+                eph_vhd_path=fake_ephemeral_path,
+                vm_gen=vm_gen)
+            if remotefx is True:
+                mock_configure_remotefx.assert_called_once_with(
+                    mock_instance,
+                    flavor.extra_specs['hyperv:remotefx'])
 
-        ebs_root = vm_gen is not constants.VM_GEN_2 and fake_root_path is None
-        mock_attach_volumes.assert_called_once_with(mock.sentinel.DEV_INFO,
-                                                    mock_instance.name,
-                                                    ebs_root)
-        self._vmops._vmutils.create_nic.assert_called_once_with(
-            mock_instance.name, mock.sentinel.ID, mock.sentinel.ADDRESS)
-        mock_vif_driver.plug.assert_called_once_with(mock_instance,
-                                                     fake_network_info)
-        mock_enable = self._vmops._vmutils.enable_vm_metrics_collection
-        if enable_instance_metrics:
-            mock_enable.assert_called_once_with(mock_instance.name)
+            self._vmops._vmutils.create_vm.assert_called_once_with(
+                mock_instance.name, mock_instance.memory_mb,
+                mock_instance.vcpus, CONF.hyperv.limit_cpu_features,
+                CONF.hyperv.dynamic_memory_ratio, vm_gen, instance_path,
+                [mock_instance.uuid])
+            expected = []
+            ctrl_type = vmops.VM_GENERATIONS_CONTROLLER_TYPES[vm_gen]
+            ctrl_disk_addr = 0
+            if fake_root_path:
+                expected.append(mock.call(mock_instance.name, fake_root_path,
+                                          0, ctrl_disk_addr, ctrl_type,
+                                          constants.DISK))
+                ctrl_disk_addr += 1
+            if fake_ephemeral_path:
+                expected.append(mock.call(mock_instance.name,
+                                          fake_ephemeral_path, 0,
+                                          ctrl_disk_addr,
+                                          ctrl_type, constants.DISK))
+            mock_attach_drive.has_calls(expected)
+            mock_create_scsi_ctrl = self._vmops._vmutils.create_scsi_controller
+            mock_create_scsi_ctrl.assert_called_once_with(
+                mock_instance.name)
+
+            ebs_root = (
+                vm_gen is not constants.VM_GEN_2 and fake_root_path is None)
+            mock_attach_volumes.assert_called_once_with(mock.sentinel.DEV_INFO,
+                                                        mock_instance.name,
+                                                        ebs_root)
+            self._vmops._vmutils.create_nic.assert_called_once_with(
+                mock_instance.name, mock.sentinel.ID, mock.sentinel.ADDRESS)
+            mock_vif_driver.plug.assert_called_once_with(mock_instance,
+                                                         fake_network_info)
+            mock_enable = self._vmops._vmutils.enable_vm_metrics_collection
+            if enable_instance_metrics:
+                mock_enable.assert_called_once_with(mock_instance.name)
 
     def test_create_instance(self):
         fake_ephemeral_path = mock.sentinel.FAKE_EPHEMERAL_PATH
@@ -447,6 +474,20 @@ class VMOpsTestCase(test_base.HyperVBaseTestCase):
                                    fake_ephemeral_path=None,
                                    enable_instance_metrics=False,
                                    vm_gen=constants.VM_GEN_2)
+
+    def test_create_instance_with_remote_fx(self):
+        self._test_create_instance(fake_root_path=None,
+                                   fake_ephemeral_path=None,
+                                   enable_instance_metrics=False,
+                                   vm_gen=constants.VM_GEN_1,
+                                   remotefx=True)
+
+    def test_create_instance_with_remote_fx_gen2(self):
+        self._test_create_instance(fake_root_path=None,
+                                   fake_ephemeral_path=None,
+                                   enable_instance_metrics=False,
+                                   vm_gen=constants.VM_GEN_2,
+                                   remotefx=True)
 
     def test_attach_drive_vm_to_scsi(self):
         self._vmops._attach_drive(
@@ -1067,3 +1108,32 @@ class VMOpsTestCase(test_base.HyperVBaseTestCase):
                                       mock.sentinel.FAKE_DEST),
                             mock.call(mock.sentinel.FAKE_DVD_PATH2,
                                       mock.sentinel.FAKE_DEST))
+
+    def _test_configure_remotefx(self, exception=False):
+        self.flags(enable_remotefx=True, group='hyperv')
+        mock_instance = fake_instance.fake_instance_obj(self.context)
+
+        fake_resolution = "1920x1200"
+        fake_monitor_count = 3
+        fake_config = "%s,%s" % (fake_resolution, fake_monitor_count)
+
+        self._vmops._vmutils.enable_remotefx_video_adapter = mock.MagicMock()
+        enable_remotefx = self._vmops._vmutils.enable_remotefx_video_adapter
+        self._vmops._hostutils.check_server_feature = mock.MagicMock()
+
+        if exception:
+            self._vmops._hostutils.check_server_feature.return_value = False
+            self.assertRaises(vmutils.HyperVException,
+                              self._vmops._configure_remotefx,
+                              mock_instance, fake_config)
+        else:
+            self._vmops._configure_remotefx(mock_instance, fake_config)
+            enable_remotefx.assert_called_once_with(mock_instance.name,
+                                                    fake_monitor_count,
+                                                    fake_resolution)
+
+    def test_configure_remotefx_exception(self):
+        self._test_configure_remotefx(exception=True)
+
+    def test_configure_remotefx(self):
+        self._test_configure_remotefx()

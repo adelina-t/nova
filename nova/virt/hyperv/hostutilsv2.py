@@ -32,3 +32,15 @@ class HostUtilsV2(hostutils.HostUtils):
     def _init_wmi_virt_conn(self):
         if sys.platform == 'win32':
             self._conn_virt = wmi.WMI(moniker='//./root/virtualization/v2')
+
+    def get_remotefx_gpu_info(self):
+        gpus = []
+        all_gpus = self._conn_virt.Msvm_Physical3dGraphicsProcessor(
+            EnabledForVirtualization=True)
+        for gpu in all_gpus:
+            gpus.append({'name': gpu.Name,
+                         'driver_version': gpu.DriverVersion,
+                         'total_video_ram': gpu.TotalVideoMemory,
+                         'available_video_ram': gpu.AvailableVideoMemory,
+                         'directx_version': gpu.DirectXVersion})
+        return gpus
