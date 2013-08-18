@@ -22,6 +22,7 @@ from oslo.utils import excutils
 from oslo.utils import units
 
 from nova.i18n import _
+from nova.image import glance
 from nova.openstack.common import log as logging
 from nova import utils
 from nova.virt.hyperv import utilsfactory
@@ -136,3 +137,8 @@ class ImageCache(object):
                 return resized_vhd_path
 
         return vhd_path
+
+    def get_image_metadata(self, context, image_ref):
+        (image_svc, image_id) = glance.get_remote_image_service(context,
+                                                                image_ref)
+        return image_svc.show(context, image_ref)

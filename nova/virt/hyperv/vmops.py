@@ -29,6 +29,7 @@ from oslo.utils import units
 from oslo_concurrency import processutils
 
 from nova.api.metadata import base as instance_metadata
+from nova import context as nova_context
 from nova import exception
 from nova.i18n import _, _LI, _LE, _LW
 from nova.openstack.common import fileutils
@@ -82,6 +83,11 @@ hyperv_opts = [
                help='Number of seconds to wait for instance to shut down after'
                     ' soft reboot request is made. We fall back to hard reboot'
                     ' if instance does not shutdown within this window.'),
+    cfg.BoolOpt('enable_remotefx',
+                default=False,
+                help='Enables RemoteFx. This requires at least one DirectX 11 '
+                     'capable graphic adapter and the RDS-Virtualization '
+                     'feature enabled')
 ]
 
 CONF = cfg.CONF
@@ -120,6 +126,7 @@ class VMOps(object):
         self._vmutils = utilsfactory.get_vmutils()
         self._vhdutils = utilsfactory.get_vhdutils()
         self._pathutils = utilsfactory.get_pathutils()
+        self._hostutils = utilsfactory.get_hostutils()
         self._volumeops = volumeops.VolumeOps()
         self._imagecache = imagecache.ImageCache()
         self._vif_driver = None
@@ -321,6 +328,36 @@ class VMOps(object):
             self._vmutils.enable_vm_metrics_collection(instance_name)
 
         self._create_vm_com_port_pipe(instance)
+        self._configure_remotefx(instance)
+
+    def _configure_remotefx(self, instance):
+        if CONF.hyperv.enable_remotefx:
+            instance_name = instance['name']
+            LOG.debug(_('Configuring RemoteFX for instance: %s'),
+                      instance_name)
+
+            context = nova_context.get_admin_context()
+
+            image_metadata = self._imagecache.get_image_metadata(
+                context, instance['image_ref'])
+            image_properties = image_metadata.get('properties', {})
+
+            remotefx_max_resolution = image_properties.get(
+                'remotefx_max_resolution')
+            if remotefx_max_resolution:
+                remotefx_monitor_count = image_properties.get(
+                    'remotefx_monitor_count', 1)
+
+                if not self._hostutils.check_server_feature(
+                        self._hostutils.FEATURE_RDS_VIRTUALIZATION):
+                    raise vmutils.HyperVException(
+                        _("The RDS-Virtualization feature must be installed "
+                          "in order to use RemoteFX"))
+
+                self._vmutils.enable_remotefx_video_adapter(
+                    instance_name,
+                    remotefx_monitor_count,
+                    remotefx_max_resolution)
 
     def _create_config_drive(self, instance, injected_files, admin_password):
         if CONF.config_drive_format != 'iso9660':

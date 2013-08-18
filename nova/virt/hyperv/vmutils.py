@@ -750,3 +750,8 @@ class VMUtils(object):
             if v.EnabledState == constants.HYPERV_VM_STATE_ENABLED]
 
         return active_vm_names
+
+    def enable_remotefx_video_adapter(self, vm_name, monitor_count,
+                                      max_resolution):
+        raise NotImplementedError(_('RemoteFX is currently not supported by '
+                                    'this driver on this version of Hyper-V'))
