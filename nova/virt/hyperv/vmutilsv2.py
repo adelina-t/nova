@@ -26,6 +26,7 @@ if sys.platform == 'win32':
 
 from oslo.config import cfg
 
+from nova.i18n import _
 from nova.openstack.common import log as logging
 from nova.virt.hyperv import constants
 from nova.virt.hyperv import vmutils
@@ -46,6 +47,12 @@ class VMUtilsV2(vmutils.VMUtils):
     _SCSI_CTRL_RES_SUB_TYPE = 'Microsoft:Hyper-V:Synthetic SCSI Controller'
     _SERIAL_PORT_RES_SUB_TYPE = 'Microsoft:Hyper-V:Serial Port'
 
+    _S3_DISP_CTRL_RES_SUB_TYPE = 'Microsoft:Hyper-V:S3 Display Controller'
+    _SYNTH_DISP_CTRL_RES_SUB_TYPE = ('Microsoft:Hyper-V:Synthetic Display '
+                                     'Controller')
+    _SYNTH_3D_DISP_CTRL_RES_SUB_TYPE = ('Microsoft:Hyper-V:Synthetic 3D '
+                                        'Display Controller')
+
     _VIRTUAL_SYSTEM_TYPE_REALIZED = 'Microsoft:Hyper-V:System:Realized'
     _VIRTUAL_SYSTEM_SUBTYPE_GEN2 = 'Microsoft:Hyper-V:SubType:2'
 
@@ -59,6 +66,14 @@ class VMUtilsV2(vmutils.VMUtils):
     'Msvm_EthernetPortAllocationSettingData'
 
     _AUTOMATIC_STARTUP_ACTION_NONE = 2
+
+    _remote_fx_res_map = {
+        constants.REMOTEFX_MAX_RES_1024x768: 0,
+        constants.REMOTEFX_MAX_RES_1280x1024: 1,
+        constants.REMOTEFX_MAX_RES_1600x1200: 2,
+        constants.REMOTEFX_MAX_RES_1920x1200: 3,
+        constants.REMOTEFX_MAX_RES_2560x1600: 4
+    }
 
     _vm_power_states_map = {constants.HYPERV_VM_STATE_ENABLED: 2,
                             constants.HYPERV_VM_STATE_DISABLED: 3,
@@ -296,3 +311,57 @@ class VMUtilsV2(vmutils.VMUtils):
             Subject=element.path_(),
             Definition=definition_path,
             MetricCollectionEnabled=self._METRIC_ENABLED)
+
+    def enable_remotefx_video_adapter(self, vm_name, monitor_count,
+                                      max_resolution):
+        vm = self._lookup_vm_check(vm_name)
+
+        max_res_value = self._remote_fx_res_map.get(max_resolution)
+        if max_res_value is None:
+            raise vmutils.HyperVException(_("Unsupported RemoteFX resolution: "
+                                            "%s") % max_resolution)
+
+        synth_3d_video_pool = self._conn.Msvm_Synth3dVideoPool()[0]
+        if not synth_3d_video_pool.IsGpuCapable:
+            raise vmutils.HyperVException(_("To enable RemoteFX on Hyper-V at "
+                                            "least one GPU supporting DirectX "
+                                            "11 is required"))
+        if not synth_3d_video_pool.IsSlatCapable:
+            raise vmutils.HyperVException(_("To enable RemoteFX on Hyper-V it "
+                                            "is required that the host CPUs "
+                                            "support SLAT"))
+
+        vmsettings = vm.associators(
+            wmi_result_class='Msvm_VirtualSystemSettingData')
+        rasds = vmsettings[0].associators(
+            wmi_result_class='Cim_ResourceAllocationSettingData')
+
+        if [r for r in rasds if r.ResourceSubType ==
+                self._SYNTH_3D_DISP_CTRL_RES_SUB_TYPE]:
+            raise vmutils.HyperVException(_("RemoteFX is already configured "
+                                            "for this VM"))
+
+        synth_disp_ctrl_res_list = [r for r in rasds if r.ResourceSubType ==
+                                    self._SYNTH_DISP_CTRL_RES_SUB_TYPE]
+        if synth_disp_ctrl_res_list:
+            self._remove_virt_resource(synth_disp_ctrl_res_list[0], vm.path_())
+
+        synth_3d_disp_ctrl_res = self._get_new_resource_setting_data(
+            self._SYNTH_3D_DISP_CTRL_RES_SUB_TYPE,
+            'Msvm_Synthetic3DDisplayControllerSettingData')
+
+        synth_3d_disp_ctrl_res.MaximumMonitors = monitor_count
+        synth_3d_disp_ctrl_res.MaximumScreenResolution = max_res_value
+
+        self._add_virt_resource(synth_3d_disp_ctrl_res, vm.path_())
+
+        s3_disp_ctrl_res = [r for r in rasds if r.ResourceSubType ==
+                            self._S3_DISP_CTRL_RES_SUB_TYPE][0]
+
+        dx_version = map(int, synth_3d_video_pool.DirectXVersion.split('.'))
+        if dx_version >= [11, 0]:
+            s3_disp_ctrl_res.Address = "02C1,00000000,01"
+        else:
+            s3_disp_ctrl_res.Address = "02C1,00000000,00"
+
+        self._modify_virt_resource(s3_disp_ctrl_res, vm.path_())

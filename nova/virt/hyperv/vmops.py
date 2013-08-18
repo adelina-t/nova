@@ -82,6 +82,12 @@ hyperv_opts = [
                help='Number of seconds to wait for instance to shut down after'
                     ' soft reboot request is made. We fall back to hard reboot'
                     ' if instance does not shutdown within this window.'),
+
+    cfg.BoolOpt('enable_remotefx',
+                default=False,
+                help='Enables RemoteFx. This requires at least one DirectX 11 '
+                     'capable graphic adapter and the RDS-Virtualization '
+                     'feature enabled')
 ]
 
 CONF = cfg.CONF
@@ -276,7 +282,8 @@ class VMOps(object):
 
         try:
             self.create_instance(instance, network_info, block_device_info,
-                                 root_vhd_path, eph_vhd_path, vm_gen)
+                                 root_vhd_path, eph_vhd_path, vm_gen,
+                                 image_meta)
 
             if configdrive.required_by(instance):
                 configdrive_path = self._create_config_drive(instance,
@@ -290,7 +297,7 @@ class VMOps(object):
                 self.destroy(instance)
 
     def create_instance(self, instance, network_info, block_device_info,
-                        root_vhd_path, eph_vhd_path, vm_gen):
+                        root_vhd_path, eph_vhd_path, vm_gen, image_meta):
         instance_name = instance['name']
 
         self._vmutils.create_vm(instance_name,
@@ -330,6 +337,12 @@ class VMOps(object):
 
         self._create_vm_com_port_pipe(instance)
 
+        if vm_gen == constants.VM_GEN_2:
+            raise vmutils.HyperVException(_("RemoteFX is not supported on "
+                                            "generation 2 virtual machines."))
+        else:
+            self._configure_remotefx(instance, image_meta)
+
     def _attach_drive(self, instance_name, path, drive_addr, ctrl_disk_addr,
                       controller_type, drive_type=constants.DISK):
         if controller_type == constants.CTRL_TYPE_SCSI:
@@ -362,6 +375,31 @@ class VMOps(object):
                   'VHDX.') % vm_gen)
 
         return vm_gen
+
+    def _configure_remotefx(self, instance, image_meta):
+        if CONF.hyperv.enable_remotefx:
+            instance_name = instance['name']
+            LOG.debug('Configuring RemoteFX for instance: %s' %
+                      instance_name)
+
+            image_properties = image_meta.get('properties', {})
+
+            remotefx_max_resolution = image_properties.get(
+                'remotefx_max_resolution')
+            if remotefx_max_resolution:
+                remotefx_monitor_count = image_properties.get(
+                    'remotefx_monitor_count', 1)
+
+                if not self._hostutils.check_server_feature(
+                        self._hostutils.FEATURE_RDS_VIRTUALIZATION):
+                    raise vmutils.HyperVException(
+                        _("The RDS-Virtualization feature must be installed "
+                          "in order to use RemoteFX"))
+
+                self._vmutils.enable_remotefx_video_adapter(
+                    instance_name,
+                    remotefx_monitor_count,
+                    remotefx_max_resolution)
 
     def _create_config_drive(self, instance, injected_files, admin_password):
         if CONF.config_drive_format != 'iso9660':

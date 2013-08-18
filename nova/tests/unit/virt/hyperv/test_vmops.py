@@ -259,7 +259,8 @@ class VMOpsTestCase(test_base.HyperVBaseTestCase):
                                                           mock_image_meta)
             mock_create_instance.assert_called_once_with(
                 mock_instance, mock.sentinel.INFO, mock.sentinel.DEV_INFO,
-                fake_root_path, fake_ephemeral_path, fake_vm_gen)
+                fake_root_path, fake_ephemeral_path, fake_vm_gen,
+                mock_image_meta)
             mock_configdrive_required.assert_called_once_with(mock_instance)
             if configdrive_required:
                 mock_create_config_drive.assert_called_once_with(
@@ -308,7 +309,8 @@ class VMOpsTestCase(test_base.HyperVBaseTestCase):
                                     block_device_info=mock.sentinel.DEV_INFO,
                                     root_vhd_path=fake_root_path,
                                     eph_vhd_path=fake_ephemeral_path,
-                                    vm_gen=constants.VM_GEN_1)
+                                    vm_gen=constants.VM_GEN_1,
+                                    image_meta=mock.sentinel.FAKE_IMAGE_META)
         self._vmops._vmutils.create_vm.assert_called_once_with(
             mock_instance.name, mock_instance.memory_mb,
             mock_instance.vcpus, CONF.hyperv.limit_cpu_features,
@@ -710,3 +712,37 @@ class VMOpsTestCase(test_base.HyperVBaseTestCase):
             mock_list_notes.assert_called_once_with()
 
         self.assertEqual(response, [fake_uuid])
+
+    def _test_configure_remotefx(self, exception=False):
+        self.flags(enable_remotefx=True, group='hyperv')
+        mock_instance = fake_instance.fake_instance_obj(self.context)
+
+        fake_image_properties = {
+            'remotefx_max_resolution': mock.sentinel.REMOTEFX_MAX_RESOLUTION,
+            'remotefx_monitor_count': mock.sentinel.REMOTEFX_MONITOR_COUNT
+        }
+
+        mock_image_meta = mock.MagicMock()
+        mock_image_meta.get.return_value = fake_image_properties
+
+        enable_remotefx = mock.MagicMock()
+        self._vmops._vmutils.enable_remotefx_video_adapter = enable_remotefx
+        self._vmops._hostutils.check_server_feature = mock.MagicMock()
+
+        if exception:
+            self._vmops._hostutils.check_server_feature.return_value = False
+            self.assertRaises(vmutils.HyperVException,
+                              self._vmops._configure_remotefx,
+                              mock_instance,
+                              mock_image_meta)
+        else:
+            self._vmops._configure_remotefx(mock_instance, mock_image_meta)
+            enable_remotefx(mock_instance['name'],
+                            mock.sentinel.REMOTEFX_MONITOR_COUNT,
+                            mock.sentinel.REMOTEFX_MAX_RESOLUTION)
+
+    def test_configure_remotefx_exception(self):
+        self._test_configure_remotefx(exception=True)
+
+    def test_configure_remotefx(self):
+        self._test_configure_remotefx()
