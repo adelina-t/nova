@@ -42,4 +42,3 @@ class QemuTestCase(test.NoDBTestCase):
                                       utils_execute):
         image_info = images.qemu_img_info('/fake/path')
         self.assertTrue(image_info)
-        self.assertTrue(str(image_info))

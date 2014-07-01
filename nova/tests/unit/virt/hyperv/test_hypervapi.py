@@ -53,6 +53,7 @@ from nova.virt.hyperv import constants
 from nova.virt.hyperv import driver as driver_hyperv
 from nova.virt.hyperv import hostops
 from nova.virt.hyperv import hostutils
+from nova.virt.hyperv import imagecache
 from nova.virt.hyperv import ioutils
 from nova.virt.hyperv import livemigrationutils
 from nova.virt.hyperv import networkutils
@@ -98,6 +99,7 @@ class HyperVAPIBaseTestCase(test.NoDBTestCase):
         self._test_vm_name = None
         self._test_instance_dir = 'C:\\FakeInstancesPath\\instance-0000001'
         self._check_min_windows_version_satisfied = True
+        self._is_win_2012_r2_satisfied = False
 
         self._setup_stubs()
 
@@ -124,13 +126,17 @@ class HyperVAPIBaseTestCase(test.NoDBTestCase):
                         raise vmutils.HyperVException(
                             "Simulated update failure")
                     self._image_metadata = image_metadata
+
+                def show(self_fake, context, image_id):
+                    return {'properties': {constants.IMAGE_PROP_VM_GEN:
+                                           constants.IMAGE_PROP_VM_GEN_1}}
             return (FakeGlanceImageService(), 1)
         self.stubs.Set(glance, 'get_remote_image_service',
                        fake_get_remote_image_service)
 
         def fake_check_min_windows_version(fake_self, major, minor):
             if [major, minor] >= [6, 3]:
-                return False
+                return self._is_win_2012_r2_satisfied
             return self._check_min_windows_version_satisfied
         self.stubs.Set(hostutils.HostUtils, 'check_min_windows_version',
                        fake_check_min_windows_version)
@@ -164,6 +170,7 @@ class HyperVAPIBaseTestCase(test.NoDBTestCase):
         self._mox.StubOutWithMock(vmutils.VMUtils, 'create_vm')
         self._mox.StubOutWithMock(vmutils.VMUtils, 'destroy_vm')
         self._mox.StubOutWithMock(vmutils.VMUtils, 'attach_ide_drive')
+        self._mox.StubOutWithMock(vmutils.VMUtils, 'attach_scsi_drive')
         self._mox.StubOutWithMock(vmutils.VMUtils, 'create_scsi_controller')
         self._mox.StubOutWithMock(vmutils.VMUtils, 'create_nic')
         self._mox.StubOutWithMock(vmutils.VMUtils, 'set_vm_state')
@@ -174,6 +181,7 @@ class HyperVAPIBaseTestCase(test.NoDBTestCase):
         self._mox.StubOutWithMock(vmutils.VMUtils, 'set_nic_connection')
         self._mox.StubOutWithMock(vmutils.VMUtils, 'get_vm_scsi_controller')
         self._mox.StubOutWithMock(vmutils.VMUtils, 'get_vm_ide_controller')
+        self._mox.StubOutWithMock(vmutils.VMUtils, 'get_free_controller_slot')
         self._mox.StubOutWithMock(vmutils.VMUtils, 'get_attached_disks')
         self._mox.StubOutWithMock(vmutils.VMUtils,
                                   'attach_volume_to_controller')
@@ -208,6 +216,8 @@ class HyperVAPIBaseTestCase(test.NoDBTestCase):
         self._mox.StubOutWithMock(hostutils.HostUtils, 'get_volume_info')
         self._mox.StubOutWithMock(hostutils.HostUtils, 'get_windows_version')
         self._mox.StubOutWithMock(hostutils.HostUtils, 'get_local_ips')
+
+        self._mox.StubOutWithMock(imagecache.ImageCache, 'get_image_details')
 
         self._mox.StubOutWithMock(networkutils.NetworkUtils,
                                   'get_external_vswitch')
@@ -274,6 +284,15 @@ class HyperVAPITestCase(HyperVAPIBaseTestCase):
         self.assertPublicAPISignatures(driver.ComputeDriver(None), self._conn)
 
     def test_get_available_resource(self):
+        self._check_min_windows_version_satisfied = False
+        self._check_get_available_resource([constants.IMAGE_PROP_VM_GEN_1])
+
+    def test_get_available_resource_r2(self):
+        self._is_win_2012_r2_satisfied = True
+        self._check_get_available_resource([constants.IMAGE_PROP_VM_GEN_1,
+                                            constants.IMAGE_PROP_VM_GEN_2])
+
+    def _check_get_available_resource(self, expected_machine_types):
         cpu_info = {'Architecture': 'fake',
                     'Name': 'fake',
                     'Manufacturer': 'ACME, Inc.',
@@ -974,6 +993,7 @@ class HyperVAPITestCase(HyperVAPIBaseTestCase):
         vmutils.VMUtils.create_vm(mox.Func(self._check_vm_name), mox.IsA(int),
                                   mox.IsA(int), mox.IsA(bool),
                                   CONF.hyperv.dynamic_memory_ratio,
+                                  mox.IsA(int),
                                   mox.IsA(list))
 
         if not boot_from_volume:
@@ -1206,8 +1226,6 @@ class HyperVAPITestCase(HyperVAPIBaseTestCase):
         fake_mounted_disk = "fake_mounted_disk"
         fake_device_number = 0
         fake_controller_path = 'fake_scsi_controller_path'
-        self._mox.StubOutWithMock(self._conn._volumeops,
-                                  '_get_free_controller_slot')
 
         self._mock_login_storage_target(target_iqn, target_lun,
                                         target_portal,
@@ -1227,8 +1245,7 @@ class HyperVAPITestCase(HyperVAPIBaseTestCase):
             m.AndReturn(fake_controller_path)
 
             fake_free_slot = 1
-            m = self._conn._volumeops._get_free_controller_slot(
-                fake_controller_path)
+            m = vmutils.VMUtils.get_free_controller_slot(fake_controller_path)
             m.AndReturn(fake_free_slot)
 
         m = vmutils.VMUtils.attach_volume_to_controller(instance_name,
@@ -1687,8 +1704,12 @@ class HyperVAPITestCase(HyperVAPIBaseTestCase):
             self._mock_attach_config_drive(instance, config_drive_format)
 
         self._mox.ReplayAll()
+
+        image_meta = {'properties': {constants.IMAGE_PROP_VM_GEN:
+                                     constants.IMAGE_PROP_VM_GEN_1}}
         self._conn.finish_migration(self._context, None, instance, "",
-                                    network_info, None, False, None, power_on)
+                                    network_info, image_meta, False, None,
+                                    power_on)
         self._mox.VerifyAll()
 
         if config_drive:
@@ -1749,6 +1770,11 @@ class HyperVAPITestCase(HyperVAPIBaseTestCase):
             m.AndReturn(self._test_instance_dir)
         else:
             m.AndReturn(None)
+
+        m = imagecache.ImageCache.get_image_details(mox.IsA(object),
+                                                    mox.IsA(object))
+        m.AndReturn({'properties': {constants.IMAGE_PROP_VM_GEN:
+                                    constants.IMAGE_PROP_VM_GEN_1}})
 
         self._set_vm_name(instance['name'])
         self._setup_create_instance_mocks(None, False,
@@ -1894,20 +1920,6 @@ class VolumeOpsTestCase(HyperVAPIBaseTestCase):
                 self.assertRaises(exception.NotFound,
                                   self.volumeops._get_mounted_disk_from_lun,
                                   target_iqn, target_lun)
-
-    def test_get_free_controller_slot_exception(self):
-        fake_drive = mock.MagicMock()
-        type(fake_drive).AddressOnParent = mock.PropertyMock(
-            side_effect=xrange(constants.SCSI_CONTROLLER_SLOTS_NUMBER))
-        fake_scsi_controller_path = 'fake_scsi_controller_path'
-
-        with mock.patch.object(self.volumeops._vmutils,
-                'get_attached_disks') as fake_get_attached_disks:
-            fake_get_attached_disks.return_value = (
-                [fake_drive] * constants.SCSI_CONTROLLER_SLOTS_NUMBER)
-            self.assertRaises(vmutils.HyperVException,
-                              self.volumeops._get_free_controller_slot,
-                              fake_scsi_controller_path)
 
     def test_fix_instance_volume_disk_paths(self):
         block_device_info = db_fakes.get_fake_block_device_info(

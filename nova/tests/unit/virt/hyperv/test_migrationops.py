@@ -49,7 +49,8 @@ class MigrationOpsTestCase(test.NoDBTestCase):
             return_value=None)
         self.assertRaises(vmutils.HyperVException,
                           self._migrationops._check_and_attach_config_drive,
-                          instance)
+                          instance,
+                          mock.sentinel.FAKE_VM_GEN)
 
     @mock.patch.object(migrationops.MigrationOps, '_migrate_disk_files')
     @mock.patch.object(migrationops.MigrationOps, '_check_target_flavor')
