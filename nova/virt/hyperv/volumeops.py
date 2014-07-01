@@ -27,7 +27,6 @@ from nova import exception
 from nova.i18n import _, _LE
 from nova.openstack.common import log as logging
 from nova.virt import driver
-from nova.virt.hyperv import constants
 from nova.virt.hyperv import utilsfactory
 from nova.virt.hyperv import vmutils
 
@@ -154,7 +153,7 @@ class VolumeOps(object):
                 # Find the SCSI controller for the vm
                 ctrller_path = self._vmutils.get_vm_scsi_controller(
                     instance_name)
-                slot = self._get_free_controller_slot(ctrller_path)
+                slot = self._vmutils.get_free_controller_slot(ctrller_path)
 
             self._vmutils.attach_volume_to_controller(instance_name,
                                                       ctrller_path,
@@ -166,15 +165,6 @@ class VolumeOps(object):
                           instance_name)
                 if target_iqn:
                     self.logout_storage_target(target_iqn)
-
-    def _get_free_controller_slot(self, scsi_controller_path):
-        attached_disks = self._vmutils.get_attached_disks(scsi_controller_path)
-        used_slots = [int(disk.AddressOnParent) for disk in attached_disks]
-
-        for slot in xrange(constants.SCSI_CONTROLLER_SLOTS_NUMBER):
-            if slot not in used_slots:
-                return slot
-        raise vmutils.HyperVException("Exceeded the maximum number of slots")
 
     def detach_volumes(self, block_device_info, instance_name):
         mapping = driver.block_device_info_get_mapping(block_device_info)

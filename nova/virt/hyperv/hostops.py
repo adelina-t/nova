@@ -121,6 +121,8 @@ class HostOps(object):
                  cpu_topology['cores'] *
                  cpu_topology['threads'])
 
+        hw_machine_type = self._hostutils.get_supported_vm_types()
+
         dic = {'vcpus': vcpus,
                'memory_mb': total_mem_mb,
                'memory_mb_used': used_mem_mb,
@@ -134,6 +136,8 @@ class HostOps(object):
                'supported_instances': jsonutils.dumps(
                    [(arch.I686, hv_type.HYPERV, vm_mode.HVM),
                     (arch.X86_64, hv_type.HYPERV, vm_mode.HVM)]),
+               'extra_resources': jsonutils.dumps({
+                    'hw_machine_type': hw_machine_type}),
                'numa_topology': None,
                }
 

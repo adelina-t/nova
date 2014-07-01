@@ -119,6 +119,8 @@ class HostOpsTestCase(test.NoDBTestCase):
         mock_cpu_info = self._get_mock_cpu_info()
         mock_get_cpu_info.return_value = mock_cpu_info
         mock_get_hypervisor_version.return_value = mock.sentinel.VERSION
+        self._hostops._hostutils.get_supported_vm_types.return_value = [
+            constants.VM_GEN_1]
 
         response = self._hostops.get_available_resource()
 
@@ -137,6 +139,8 @@ class HostOpsTestCase(test.NoDBTestCase):
                     'vcpus': self.FAKE_NUM_CPUS,
                     'vcpus_used': 0,
                     'hypervisor_type': 'hyperv',
+                    'extra_resources': jsonutils.dumps({
+                        'hw_machine_type': [constants.VM_GEN_1]}),
                     'numa_topology': None,
                     }
         self.assertEqual(expected, response)
