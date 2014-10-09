@@ -31,6 +31,7 @@ from nova.openstack.common import jsonutils
 from nova.openstack.common import log as logging
 from nova.virt.hyperv import constants
 from nova.virt.hyperv import utilsfactory
+from nova.virt.hyperv import vmops
 
 CONF = cfg.CONF
 CONF.import_opt('my_ip', 'nova.netconf')
@@ -140,7 +141,12 @@ class HostOps(object):
 
     def host_power_action(self, host, action):
         """Reboots, shuts down or powers up the host."""
-        pass
+        if action in ["shutdown","reboot"]:
+            self._hostutils.host_power_action(action)
+        else:
+            if action == "startup":
+                msg = _("Host PowerOn is not supported by the Hyper-V driver")
+                raise NotImplementedError(msg)
 
     def get_host_ip_addr(self):
         host_ip = CONF.my_ip
