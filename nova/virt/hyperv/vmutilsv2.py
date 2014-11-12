@@ -322,3 +322,10 @@ class VMUtilsV2(vmutils.VMUtils):
                      if sasd.ResourceSubType == self._DVD_DISK_RES_SUB_TYPE]
 
         return dvd_paths
+
+    def get_vm_generation(self, vm_name):
+        vm = self._lookup_vm_check(vm_name)
+        vssd = self._get_vm_setting_data(vm)
+        vm_gen = vssd.VirtualSystemSubType
+
+        return int(vm_gen.split(':')[-1])
