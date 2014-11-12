@@ -695,3 +695,29 @@ class VMOps(object):
         dvd_disk_paths = self._vmutils.get_vm_dvd_disk_paths(vm_name)
         for path in dvd_disk_paths:
             self._pathutils.copyfile(path, dest_host)
+
+    def attach_interface(self, instance, vif):
+        if (self._vmutils.get_vm_generation(instance.name) ==
+                constants.VM_GEN_1 and self._get_vm_state(instance.name) ==
+                constants.HYPERV_VM_STATE_ENABLED):
+            LOG.error(_LE("Cannot add NIC to a first generation VM "
+                          "while it is running."))
+            raise exception.InterfaceAttachFailed(
+                instance_uuid=instance.uuid)
+        else:
+            self._vmutils.create_nic(instance.name,
+                                     vif['id'],
+                                     vif['address'])
+            self._vif_driver.plug(instance, vif)
+
+    def detach_interface(self, instance, vif):
+        if (self._vmutils.get_vm_generation(instance.name) ==
+                constants.VM_GEN_1 and self._get_vm_state(instance.name) ==
+                constants.HYPERV_VM_STATE_ENABLED):
+            LOG.error(_LE("Cannot remove NIC from a first generation VM "
+                          "while it is running."))
+            raise exception.InterfaceDetachFailed(
+                instance_uuid=instance.uuid)
+        else:
+            self._vif_driver.unplug(instance, vif)
+            self._vmutils.destroy_nic(instance.name, vif['id'])
