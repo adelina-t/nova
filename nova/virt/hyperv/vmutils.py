@@ -475,6 +475,12 @@ class VMUtils(object):
         vm = self._lookup_vm_check(vm_name)
         self._modify_virt_resource(nic_data, vm.path_())
 
+    def destroy_nic(self, vm_name, nic_name):
+        nic_data = self._get_nic_data_by_name(nic_name)
+
+        vm = self._lookup_vm_check(vm_name)
+        self._remove_virt_resource(nic_data, vm.path_())
+
     def _get_nic_data_by_name(self, name):
         return self._conn.Msvm_SyntheticEthernetPortSettingData(
             ElementName=name)[0]
@@ -764,3 +770,6 @@ class VMUtils(object):
             if v.EnabledState == constants.HYPERV_VM_STATE_ENABLED]
 
         return active_vm_names
+
+    def get_vm_generation(self, vm_name):
+        return constants.VM_GEN_1

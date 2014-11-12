@@ -1028,3 +1028,92 @@ class VMOpsTestCase(test_base.HyperVBaseTestCase):
                                       mock.sentinel.FAKE_DEST),
                             mock.call(mock.sentinel.FAKE_DVD_PATH2,
                                       mock.sentinel.FAKE_DEST))
+
+    @mock.patch.object(vmops.VMOps, '_get_vm_state')
+    def _test_attach_interface(self,
+                               mock_get_vm_state,
+                               vm_generation,
+                               vm_power_state):
+        fake_vm = fake_instance.fake_instance_obj(self.context)
+        fake_vif = test_virtual_interface.fake_vif
+
+        mock_get_vm_state.return_value = vm_power_state
+        self._vmops._vmutils.get_vm_generation.return_value = vm_generation
+
+        self._vmops._vif_driver.plug = mock.Mock()
+        fake_vif_plug = self._vmops._vif_driver.plug
+
+        if (vm_generation == constants.VM_GEN_1
+                and vm_power_state == constants.HYPERV_VM_STATE_ENABLED):
+
+            self.assertRaises(exception.InterfaceAttachFailed,
+                              self._vmops.attach_interface,
+                              fake_vm, fake_vif)
+        else:
+            self._vmops.attach_interface(fake_vm, fake_vif)
+            self._vmops._vmutils.create_nic.assert_called_once_with(
+                                                fake_vm.name,
+                                                fake_vif['id'],
+                                                fake_vif['address'])
+            fake_vif_plug.assert_called_once_with(fake_vm, fake_vif)
+
+    def test_attach_interface_exception(self):
+        self._test_attach_interface(vm_generation=constants.VM_GEN_1,
+                vm_power_state=constants.HYPERV_VM_STATE_ENABLED)
+
+    def test_attach_interface_generation2_vm_enabled(self):
+        self._test_attach_interface(vm_generation=constants.VM_GEN_2,
+                vm_power_state=constants.HYPERV_VM_STATE_ENABLED)
+
+    def test_attach_interface_generation2_vm_disabled(self):
+        self._test_attach_interface(vm_generation=constants.VM_GEN_2,
+                vm_power_state=constants.HYPERV_VM_STATE_DISABLED)
+
+    def test_attach_interface_generation1_vm_disabled(self):
+        self._test_attach_interface(vm_generation=constants.VM_GEN_1,
+                vm_power_state=constants.HYPERV_VM_STATE_DISABLED)
+
+    @mock.patch.object(vmops.VMOps, '_get_vm_state')
+    def _test_detach_interface(self,
+                               mock_get_vm_state,
+                               vm_generation,
+                               vm_power_state):
+
+        fake_vm = fake_instance.fake_instance_obj(self.context)
+        fake_vif = test_virtual_interface.fake_vif
+
+        mock_get_vm_state.return_value = vm_power_state
+        self._vmops._vmutils.get_vm_generation.return_value = vm_generation
+
+        self._vmops._vif_driver.unplug = mock.Mock()
+        fake_vif_unplug = self._vmops._vif_driver.unplug
+
+        if (vm_generation == constants.VM_GEN_1
+                and vm_power_state == constants.HYPERV_VM_STATE_ENABLED):
+
+            self.assertRaises(exception.InterfaceDetachFailed,
+                              self._vmops.detach_interface,
+                              fake_vm, fake_vif)
+        else:
+            self._vmops.detach_interface(fake_vm, fake_vif)
+
+            fake_vif_unplug.assert_called_once_with(fake_vm, fake_vif)
+            self._vmops._vmutils.destroy_nic.assert_called_once_with(
+                                                fake_vm.name,
+                                                fake_vif['id'])
+
+    def test_detach_interface_exception(self):
+        self._test_detach_interface(vm_generation=constants.VM_GEN_1,
+                vm_power_state=constants.HYPERV_VM_STATE_ENABLED)
+
+    def test_detach_interface_generation2_vm_enabled(self):
+        self._test_detach_interface(vm_generation=constants.VM_GEN_2,
+                vm_power_state=constants.HYPERV_VM_STATE_ENABLED)
+
+    def test_detach_interface_generation2_vm_disabled(self):
+        self._test_detach_interface(vm_generation=constants.VM_GEN_2,
+                vm_power_state=constants.HYPERV_VM_STATE_DISABLED)
+
+    def test_detach_interface_generation1_vm_disabled(self):
+        self._test_detach_interface(vm_generation=constants.VM_GEN_1,
+                vm_power_state=constants.HYPERV_VM_STATE_DISABLED)
