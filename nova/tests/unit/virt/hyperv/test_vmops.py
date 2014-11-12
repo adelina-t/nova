@@ -316,3 +316,111 @@ class VMOpsTestCase(test.NoDBTestCase):
             mock_list_notes.assert_called_once_with()
 
         self.assertEqual(response, [fake_uuid])
+
+    @mock.patch.object(vmutils.VMUtils, 'get_vm_generation')
+    @mock.patch.object(vmutils.VMUtils, 'create_nic')
+    @mock.patch.object(vmops.VMOps, '_get_vm_state')
+    def _test_attach_interface(self,
+                               vm_generation,
+                               vm_power_state,
+                               fake_get_vm_state,
+                               fake_create_nic,
+                               fake_get_vm_generation):
+
+        fake_vm = dict()
+        fake_vm['name'] = mock.sentinel.FAKE_VM_NAME
+        fake_vm['uuid'] = mock.sentinel.FAKE_VM_UUID
+
+        fake_vif = dict()
+        fake_vif['id'] = mock.sentinel.FAKE_VIF_ID
+        fake_vif['address'] = mock.sentinel.FAKE_VIF_ADDRESS
+
+        fake_get_vm_state.return_value = vm_power_state
+        fake_get_vm_generation.return_value = vm_generation
+
+        self._vmops._vif_driver.plug = mock.Mock()
+        fake_vif_plug = self._vmops._vif_driver.plug
+
+        if (vm_generation == constants.VM_GEN_1
+                and vm_power_state == constants.HYPERV_VM_STATE_ENABLED):
+
+            self.assertRaises(exception.InterfaceAttachFailed,
+                              self._vmops.attach_interface,
+                              fake_vm, fake_vif)
+        else:
+            self._vmops.attach_interface(fake_vm, fake_vif)
+            fake_create_nic.assert_called_with(mock.sentinel.FAKE_VM_NAME,
+                                               mock.sentinel.FAKE_VIF_ID,
+                                               mock.sentinel.FAKE_VIF_ADDRESS)
+            fake_vif_plug.assert_called_with(fake_vm,
+                                             fake_vif)
+
+    def test_attach_interface_exception(self):
+        self._test_attach_interface(constants.VM_GEN_1,
+                                    constants.HYPERV_VM_STATE_ENABLED)
+
+    def test_attach_interface_generation2_vm_enabled(self):
+        self._test_attach_interface(constants.VM_GEN_2,
+                                    constants.HYPERV_VM_STATE_ENABLED)
+
+    def test_attach_interface_generation2_vm_disabled(self):
+        self._test_attach_interface(constants.VM_GEN_2,
+                                    constants.HYPERV_VM_STATE_DISABLED)
+
+    def test_attach_interface_generation1_vm_disabled(self):
+        self._test_attach_interface(constants.VM_GEN_1,
+                                    constants.HYPERV_VM_STATE_DISABLED)
+
+    @mock.patch.object(vmutils.VMUtils, 'get_vm_generation')
+    @mock.patch.object(vmutils.VMUtils, 'destroy_nic')
+    @mock.patch.object(vmops.VMOps, '_get_vm_state')
+    def _test_detach_interface(self,
+                               vm_generation,
+                               vm_power_state,
+                               fake_get_vm_state,
+                               fake_destroy_nic,
+                               fake_get_vm_generation):
+
+        fake_vm = dict()
+        fake_vm['name'] = mock.sentinel.FAKE_VM_NAME
+        fake_vm['uuid'] = mock.sentinel.FAKE_VM_UUID
+
+        fake_vif = dict()
+        fake_vif['id'] = mock.sentinel.FAKE_VIF_ID
+        fake_vif['address'] = mock.sentinel.FAKE_VIF_ADDRESS
+
+        fake_get_vm_state.return_value = vm_power_state
+        fake_get_vm_generation.return_value = vm_generation
+
+        self._vmops._vif_driver.unplug = mock.Mock()
+        fake_vif_unplug = self._vmops._vif_driver.unplug
+
+        if (vm_generation == constants.VM_GEN_1
+                and vm_power_state == constants.HYPERV_VM_STATE_ENABLED):
+
+            self.assertRaises(exception.InterfaceDetachFailed,
+                              self._vmops.detach_interface,
+                              fake_vm, fake_vif)
+        else:
+            self._vmops.detach_interface(fake_vm, fake_vif)
+
+            fake_vif_unplug.assert_called_with(fake_vm,
+                                               fake_vif)
+            fake_destroy_nic.assert_called_with(mock.sentinel.FAKE_VM_NAME,
+                                                mock.sentinel.FAKE_VIF_ID)
+
+    def test_detach_interface_exception(self):
+        self._test_detach_interface(constants.VM_GEN_1,
+                                    constants.HYPERV_VM_STATE_ENABLED)
+
+    def test_detach_interface_generation2_vm_enabled(self):
+        self._test_detach_interface(constants.VM_GEN_2,
+                                    constants.HYPERV_VM_STATE_ENABLED)
+
+    def test_detach_interface_generation2_vm_disabled(self):
+        self._test_detach_interface(constants.VM_GEN_2,
+                                    constants.HYPERV_VM_STATE_DISABLED)
+
+    def test_detach_interface_generation1_vm_disabled(self):
+        self._test_attach_interface(constants.VM_GEN_1,
+                                    constants.HYPERV_VM_STATE_DISABLED)

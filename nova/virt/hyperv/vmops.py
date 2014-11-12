@@ -682,3 +682,29 @@ class VMOps(object):
             if vm_serial_conn:
                 instance_uuid = os.path.basename(vm_serial_conn)
                 self.log_vm_serial_output(instance_name, instance_uuid)
+
+    def attach_interface(self, instance, vif):
+        if (self._vmutils.get_vm_generation(instance['name']) ==
+                constants.VM_GEN_1 and self._get_vm_state(instance['name']) ==
+                constants.HYPERV_VM_STATE_ENABLED):
+            LOG.error(_("Cannot not remove nic to a first generation vm"
+                        "while it is running"))
+            raise exception.InterfaceAttachFailed(
+                instance_uuid=instance['uuid'])
+        else:
+            self._vmutils.create_nic(instance['name'],
+                                     vif['id'],
+                                     vif['address'])
+            self._vif_driver.plug(instance, vif)
+
+    def detach_interface(self, instance, vif):
+        if (self._vmutils.get_vm_generation(instance['name']) ==
+                constants.VM_GEN_1 and self._get_vm_state(instance['name']) ==
+                constants.HYPERV_VM_STATE_ENABLED):
+            LOG.error(_("Cannot not remove nic to a first generation vm"
+                        "while it is running"))
+            raise exception.InterfaceDetachFailed(
+                instance_uuid=instance['uuid'])
+        else:
+            self._vif_driver.unplug(instance, vif)
+            self._vmutils.destroy_nic(instance['name'], vif['id'])

@@ -56,6 +56,7 @@ class VMUtilsTestCase(test.NoDBTestCase):
     _FAKE_ELAPSED_TIME = 0
     _CONCRETE_JOB = "Msvm_ConcreteJob"
     _FAKE_DYNAMIC_MEMORY_RATIO = 1.0
+    _FAKE_NIC_NAME = "fake_nic_name"
 
     _FAKE_SUMMARY_INFO = {'NumberOfProcessors': 4,
                           'EnabledState': 2,
@@ -388,6 +389,21 @@ class VMUtilsTestCase(test.NoDBTestCase):
                 self._FAKE_VM_NAME, self._FAKE_RES_NAME, self._FAKE_ADDRESS)
 
             mock_add_virt_res.assert_called_with(mock_nic, self._FAKE_VM_PATH)
+
+    @mock.patch.object(vmutils.VMUtils, '_get_nic_data_by_name')
+    def test_destroy_nic(self, mock_get_nic_data_by_name):
+        self._lookup_vm()
+        fake_nic_data = mock.MagicMock()
+
+        mock_get_nic_data_by_name.return_value = fake_nic_data
+
+        with mock.patch.object(self._vmutils,
+                '_remove_virt_resource') as mock_remove_virt_res:
+
+            self._vmutils.destroy_nic(self._FAKE_VM_NAME,
+                                      self._FAKE_NIC_NAME)
+            mock_remove_virt_res.assert_called_with(fake_nic_data,
+                self._FAKE_VM_PATH)
 
     def test_set_vm_state(self):
         mock_vm = self._lookup_vm()
@@ -757,3 +773,21 @@ class VMUtilsTestCase(test.NoDBTestCase):
         self.assertEqual(mock.sentinel.fake_value,
                          compare.Properties_.Item().Value)
         self.assertEqual(compare, response)
+
+    def _test_get_vm_generation(self, vm_gen):
+        vm_gen_string = "Microsoft:Hyper-V:SubType:" + str(vm_gen)
+
+        mock_vssd = mock.Mock(VirtualSystemSubType=vm_gen_string)
+        mock_vssd.VirtualSystemSubType = vm_gen_string
+
+        self._vmutils._conn.Msvm_VirtualSystemSettingData.return_value = [
+            mock_vssd]
+
+        ret = self._vmutils.get_vm_generation(mock.sentinel.FAKE_VM_NAME)
+        self.assertEqual(vm_gen, ret)
+
+    def test_get_vm_generation_gen1(self):
+        self._test_get_vm_generation(constants.VM_GEN_1)
+
+    def test_get_vm_generation_gen2(self):
+        self._test_get_vm_generation(constants.VM_GEN_2)
