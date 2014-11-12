@@ -694,3 +694,49 @@ class VMOps(object):
         dvd_disk_paths = self._vmutils.get_vm_dvd_disk_paths(vm_name)
         for path in dvd_disk_paths:
             self._pathutils.copyfile(path, dest_host)
+
+    def _check_hotplug_is_available(self, instance):
+        if (self._get_vm_state(instance.name) ==
+            constants.HYPERV_VM_STATE_DISABLED):
+            return False
+
+        if not self._hostutils.check_min_windows_version(6, 4):
+            LOG.error(_LE("This version of Windows does not support vNIC "
+                          "hot plugging."))
+            raise exception.InterfaceAttachFailed(
+                instance_uuid=instance.uuid)
+
+        if (self._vmutils.get_vm_generation(instance.name) ==
+                constants.VM_GEN_1):
+                LOG.error(_LE("Cannot hot plug vNIC to a first generation "
+                              "VM."))
+                raise exception.InterfaceAttachFailed(
+                    instance_uuid=instance.uuid)
+
+        return True
+
+    def attach_interface(self, instance, vif):
+        if self._check_hotplug_is_available(instance):
+            self._create_and_attach_interface(instance, vif,
+                constants.HYPERV_VM_STATE_ENABLED)
+        else:
+            self._create_and_attach_interface(instance, vif,
+                constants.HYPERV_VM_STATE_DISABLED)
+
+    def _create_and_attach_interface(self, instance, vif, vm_state):
+        self._vmutils.create_nic(instance.name,
+                           vif['id'],
+                           vif['address'])
+        vif_driver = self._get_vif_driver(vif.get('type'))
+        vif_driver.plug(instance, vif)
+        if vm_state == constants.HYPERV_VM_STATE_ENABLED:
+            vif_driver.post_start(instance, vif)
+
+    def detach_interface(self, instance, vif):
+        self._check_hotplug_is_available(instance)
+        self._detach_and_destroy_interface(instance, vif)
+
+    def _detach_and_destroy_interface(self, instance, vif):
+        vif_driver = self._get_vif_driver(vif.get('type'))
+        vif_driver.unplug(instance, vif)
+        self._vmutils.destroy_nic(instance.name, vif['id'])
