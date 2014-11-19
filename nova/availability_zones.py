@@ -20,6 +20,7 @@ import collections
 from oslo.config import cfg
 
 from nova import objects
+from nova.openstack.common import log as logging
 from nova.openstack.common import memorycache
 
 # NOTE(vish): azs don't change that often, so cache them for an hour to
@@ -38,6 +39,7 @@ availability_zone_opts = [
 
 CONF = cfg.CONF
 CONF.register_opts(availability_zone_opts)
+LOG = logging.getLogger(__name__)
 
 
 def _get_cache():
@@ -180,15 +182,43 @@ def get_availability_zones(context, get_only_available=False,
 
 def get_instance_availability_zone(context, instance):
     """Return availability zone of specified instance."""
-    host = str(instance.get('host'))
+    # str(None) returns None, but it is not interpreted
+    # False in the below if-clause
+    host = instance.get('host')
+    az_inst = str(instance.get('availability_zone'))
+    print "<<<< az_inst ", az_inst
     if not host:
-        return None
+        # Without "str", Tempest will be failed as follows
+        # Details: HTTP response body is invalid (None is not of type 'string'
+        return str(None)
+
+    host = str(host)
 
     cache_key = _make_cache_key(host)
     cache = _get_cache()
     az = cache.get(cache_key)
+    print "<<<<<< cache_az ", az
+
+    # az cache can un-expectedly go wrong. If so, update az cache
+    # with the one stored in instance if existed
+    print (az_inst and az != az_inst)
+    if az_inst and az != az_inst:
+        print "intru in prumul if"
+        LOG.debug('get_instance_availability_zone - az stored in cache '
+                  '(%(az)s) differs from az stored in VM instance '
+                  '(%(az_inst)s)'
+                  ' and thus az in cache is updated',
+                  {'az': az, 'az_inst': az_inst})
+        az = az_inst
+        print "az dupa atribuire " , az
+        cache.set(cache_key, az, AZ_CACHE_SECONDS)
+
+    # If az cache is None and az stored in instance does not exist
+    # but host is valid, then get az from db eventually
     if not az:
+        print "intru in if 2 "
         elevated = context.elevated()
         az = get_host_availability_zone(elevated, host)
         cache.set(cache_key, az, AZ_CACHE_SECONDS)
+        print "az acolo ", az
     return az

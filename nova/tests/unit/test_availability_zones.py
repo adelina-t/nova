@@ -253,3 +253,54 @@ class AvailabilityZoneTestCases(test.TestCase):
 
         self.assertEqual(self.availability_zone,
                 az.get_instance_availability_zone(self.context, fake_inst))
+
+    def test_get_instance_availability_zone_host_unavailable(self):
+        """Test get instance availability zone if host not available."""
+        fake_inst_id = 162
+        fake_inst = fakes.stub_instance(fake_inst_id, host=self.host)
+
+        # Both host and az are None
+        fake_inst['host'] = None
+        fake_inst['availability_zone'] = None
+
+        self.assertEqual(str(None),
+                az.get_instance_availability_zone(self.context, fake_inst))
+
+        # host is None but az is available
+        fake_inst['host'] = None
+        fake_inst['availability_zone'] = self.default_az
+
+        self.assertEqual(str(None),
+                az.get_instance_availability_zone(self.context, fake_inst))
+
+    def test_get_instance_availability_zone_azcache_modified(self):
+        """Test get instance availability zone if azcache modified."""
+        fake_inst_id = 162
+        fake_inst = fakes.stub_instance(fake_inst_id, host=self.host)
+
+        # az from cache is changed unexpectedly and thus it's different from
+        # the one stored in instance. In such case, az cache will be updated
+        # with the value from instance
+        az_cache = 'test_az'
+        cache_key = az._make_cache_key(self.host)
+        az.update_host_availability_zone_cache(self.context,
+                self.host, az_cache)
+        self.assertEqual(az._get_cache().get(cache_key), az_cache)
+
+        self.assertEqual(self.default_az,
+                az.get_instance_availability_zone(self.context, fake_inst))
+
+    def test_get_instance_availability_zone_azcache_reset(self):
+        """Test get instance availability zone if azcache reset."""
+        fake_inst_id = 162
+        fake_inst = fakes.stub_instance(fake_inst_id, host=self.host)
+
+        # az cache is reset
+        az.reset_cache()
+
+        self.assertEqual(self.default_az,
+                az.get_instance_availability_zone(self.context, fake_inst))
+
+        # Check if az cache is replicated (after reset) with the instance az
+        cache_key = az._make_cache_key(self.host)
+        self.assertEqual(az._get_cache().get(cache_key), self.default_az)
