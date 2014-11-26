@@ -323,11 +323,14 @@ class HostManagerTestCase(test.NoDBTestCase):
                         host_states_map[('host3', 'node3')].numa_topology
                     )._to_dict(),
                 matchers.DictMatches(fakes.NUMA_TOPOLOGY._to_dict()))
+        self.assertIsNone(host_states_map[('host3', 'node3')].extra_resources)
         self.assertEqual(host_states_map[('host4', 'node4')].free_ram_mb,
                          8192)
         # 8191GB
         self.assertEqual(host_states_map[('host4', 'node4')].free_disk_mb,
                          8388608)
+        self.assertThat(host_states_map[('host4', 'node4')].extra_resources,
+                        matchers.DictMatches(fakes.EXTRA_RESOURCES))
 
 
 class HostManagerChangedNodesTestCase(test.NoDBTestCase):

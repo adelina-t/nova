@@ -31,6 +31,8 @@ NUMA_TOPOLOGY = hardware.VirtNUMAHostTopology(
                                   hardware.VirtNUMATopologyCellUsage(
                                       1, set([3, 4]), 512)])
 
+EXTRA_RESOURCES = {'dummy_extra_resource': 'dummy_value'}
+
 COMPUTE_NODES = [
         dict(id=1, local_gb=1024, memory_mb=1024, vcpus=1,
              disk_available_least=None, free_ram_mb=512, vcpus_used=1,
@@ -55,7 +57,8 @@ COMPUTE_NODES = [
              free_disk_gb=8888, local_gb_used=0, updated_at=None,
              service=dict(host='host4', disabled=False),
              hypervisor_hostname='node4', host_ip='127.0.0.1',
-             hypervisor_version=0, numa_topology=None),
+             hypervisor_version=0, numa_topology=None,
+             extra_resources=jsonutils.dumps(EXTRA_RESOURCES)),
         # Broken entry
         dict(id=5, local_gb=1024, memory_mb=1024, vcpus=1, service=None),
 ]
