@@ -50,6 +50,7 @@ host_manager_opts = [
                   'ComputeFilter',
                   'ComputeCapabilitiesFilter',
                   'ImagePropertiesFilter',
+                  'ImageExtraResourcesFilter',
                   'ServerGroupAntiAffinityFilter',
                   'ServerGroupAffinityFilter',
                   ],
