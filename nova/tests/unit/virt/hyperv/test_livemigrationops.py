@@ -64,7 +64,7 @@ class LiveMigrationOpsTestCase(test_base.HyperVBaseTestCase):
             mock_live_migr.assert_called_once_with(mock_instance.name,
                                                    fake_dest)
             mock_post.assert_called_once_with(self.context, mock_instance,
-                                              fake_dest, False)
+                                              fake_dest, False, None)
 
     def test_live_migration(self):
         self._test_live_migration(side_effect=None)
@@ -119,10 +119,14 @@ class LiveMigrationOpsTestCase(test_base.HyperVBaseTestCase):
             mock.sentinel.instance.name, create_dir=False, remove_dir=True)
 
     @mock.patch('nova.virt.hyperv.vmops.VMOps.log_vm_serial_output')
-    def test_post_live_migration_at_destination(self, mock_log_vm):
+    @mock.patch('nova.virt.hyperv.vmops.VMOps.post_start_vifs')
+    def test_post_live_migration_at_destination(self, mock_post_start_vifs,
+                                                mock_log_vm):
         mock_instance = fake_instance.fake_instance_obj(self.context)
         self._livemigrops.post_live_migration_at_destination(
             self.context, mock_instance, network_info=mock.sentinel.NET_INFO,
             block_migration=mock.sentinel.BLOCK_INFO)
         mock_log_vm.assert_called_once_with(mock_instance.name,
                                             mock_instance.uuid)
+        mock_post_start_vifs.assert_called_once_with(mock_instance,
+                                                     mock.sentinel.NET_INFO)

@@ -176,3 +176,25 @@ class LibvirtLiveMigrateData(LiveMigrateData):
                 self.serial_listen_addr = pre_result['serial_listen_addr']
             self._bdms_from_legacy(pre_result)
         LOG.debug('Converted object: %s' % self)
+
+
+@obj_base.NovaObjectRegistry.register
+class HyperVLiveMigrateData(obj_base.NovaObject):
+    VERSION = '1.0'
+
+    fields = {
+        'is_shared_instance_path': fields.BooleanField(),
+    }
+
+    def to_legacy_dict(self, pre_migration_result=False):
+        legacy = super(HyperVLiveMigrateData, self).to_legacy_dict()
+
+        if self.obj_attr_is_set('is_shared_instance_path'):
+            legacy['is_shared_instance_path'] = self.is_shared_instance_path
+
+        return legacy
+
+    def from_legacy_dict(self, legacy):
+        super(HyperVLiveMigrateData, self).from_legacy_dict()
+        if 'is_shared_instance_path' in legacy:
+            self.migration = legacy['is_shared_instance_path']

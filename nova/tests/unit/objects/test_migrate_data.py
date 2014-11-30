@@ -189,3 +189,48 @@ class TestLibvirtLiveMigrateData(test_objects._LocalTest,
 class TestRemoteLibvirtLiveMigrateData(test_objects._RemoteTest,
                                        _TestLibvirtLiveMigrateData):
     pass
+
+
+class _TestHyperVLiveMigrateData(object):
+    def test_to_legacy_dict(self):
+        obj = migrate_data.LiveMigrateData(is_volume_backed=False,
+                                           is_shared_instance_path=True)
+        self.assertEqual({'is_volume_backed': False,
+                          'is_shared_instance_path': True},
+                         obj.to_legacy_dict())
+
+    def test_from_legacy_dict(self):
+        obj = migrate_data.LiveMigrateData()
+        obj.from_legacy_dict({'is_volume_backed': False,
+                              'is_shared_instance_path': True,
+                              'ignore': 'foo'})
+        self.assertEqual(False, obj.is_volume_backed)
+        self.assertEqual(True, obj.is_shared_instance_path)
+
+    def test_from_legacy_dict_migration(self):
+        migration = objects.Migration()
+        obj = migrate_data.LiveMigrateData()
+        obj.from_legacy_dict({'is_volume_backed': False,
+                              'is_shared_instance_path': False,
+                              'ignore': 'foo',
+                              'migration': migration})
+        self.assertEqual(False, obj.is_volume_backed)
+        self.assertIsInstance(obj.migration, objects.Migration)
+
+    def test_legacy_with_pre_live_migration_result(self):
+        obj = migrate_data.LiveMigrateData(is_volume_backed=False,
+                                           is_shared_instance_path=False)
+        self.assertEqual({'pre_live_migration_result': {},
+                          'is_shared_instance_path': False,
+                          'is_volume_backed': False},
+                         obj.to_legacy_dict(pre_migration_result=True))
+
+
+class TestHyperVLiveMigrateData(test_objects._LocalTest,
+                                _TestLiveMigrateData):
+    pass
+
+
+class TestRemoteHyperVLiveMigrateData(test_objects._RemoteTest,
+                                      _TestLiveMigrateData):
+    pass

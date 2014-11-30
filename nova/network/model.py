@@ -45,6 +45,7 @@ VIF_TYPE_OTHER = 'other'
 VIF_TYPE_TAP = 'tap'
 VIF_TYPE_MACVTAP = 'macvtap'
 VIF_TYPE_BINDING_FAILED = 'binding_failed'
+VIF_TYPE_HYPERV = 'hyperv'
 
 # Constants for dictionary keys in the 'vif_details' field in the VIF
 # class

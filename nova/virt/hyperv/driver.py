@@ -148,7 +148,22 @@ class HyperVDriver(driver.ComputeDriver):
     def cleanup(self, context, instance, network_info, block_device_info=None,
                 destroy_disks=True, migrate_data=None, destroy_vifs=True):
         """Cleanup after instance being destroyed by Hypervisor."""
-        pass
+        if migrate_data:
+            # During live migration the ports need to be the ovs bridge on the
+            # source machine after they are added in the bridge on the
+            # destination machine otherwise the instance network info will
+            # be lost. On Hyper-V ports cannot exist in absence of a vm,
+            # thus we need to wait until the machine is at the destination
+            # to add the ports to the bridge, more precisly we have to add
+            # them in the post_live_migration_at_destination method. Given
+            # the sequence of operations in live_migration cleanup is the
+            # only method suitable to delete the ports from the bridge on
+            # the source machine.
+            # The drive method, post_live_migrate_at_source which was designed
+            # for this task is not suitable in the case of Hyper-V given
+            # that it is called before the post_live_migration_at_destination
+            # method.
+            self._vmops.unplug_vifs(instance, network_info)
 
     def get_info(self, instance):
         return self._vmops.get_info(instance)
@@ -196,7 +211,7 @@ class HyperVDriver(driver.ComputeDriver):
 
     def power_on(self, context, instance, network_info,
                  block_device_info=None):
-        self._vmops.power_on(instance, block_device_info)
+        self._vmops.power_on(instance, block_device_info, network_info)
 
     def resume_state_on_host_boot(self, context, instance, network_info,
                                   block_device_info=None):

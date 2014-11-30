@@ -264,7 +264,7 @@ class MigrationOpsTestCase(test_base.HyperVBaseTestCase):
         mock_check_attach_config_drive.assert_called_once_with(
             mock_instance, get_image_vm_gen.return_value)
         self._migrationops._vmops.power_on.assert_called_once_with(
-            mock_instance)
+            mock_instance, network_info=mock.sentinel.network_info)
 
     def test_finish_revert_migration_boot_from_volume(self):
         self._check_finish_revert_migration(boot_from_volume=True)

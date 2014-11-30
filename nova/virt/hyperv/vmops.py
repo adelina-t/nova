@@ -31,20 +31,20 @@ from oslo_log import log as logging
 from oslo_service import loopingcall
 from oslo_utils import excutils
 from oslo_utils import fileutils
-from oslo_utils import importutils
 from oslo_utils import units
 from oslo_utils import uuidutils
 import six
 
 from nova.api.metadata import base as instance_metadata
 from nova import exception
-from nova.i18n import _, _LI, _LE, _LW
+from nova.i18n import _LI, _LE, _LW
 from nova import utils
 from nova.virt import configdrive
 from nova.virt import hardware
 from nova.virt.hyperv import constants
 from nova.virt.hyperv import imagecache
 from nova.virt.hyperv import pathutils
+from nova.virt.hyperv import vif as vif_utils
 from nova.virt.hyperv import volumeops
 
 LOG = logging.getLogger(__name__)
@@ -89,7 +89,6 @@ hyperv_opts = [
 CONF = cfg.CONF
 CONF.register_opts(hyperv_opts, 'hyperv')
 CONF.import_opt('use_cow_images', 'nova.virt.driver')
-CONF.import_opt('network_api_class', 'nova.network')
 
 SHUTDOWN_TIME_INCREMENT = 5
 REBOOT_TYPE_SOFT = 'SOFT'
@@ -117,13 +116,6 @@ def check_admin_permissions(function):
 
 
 class VMOps(object):
-    _vif_driver_class_map = {
-        'nova.network.neutronv2.api.API':
-        'nova.virt.hyperv.vif.HyperVNeutronVIFDriver',
-        'nova.network.api.API':
-        'nova.virt.hyperv.vif.HyperVNovaNetworkVIFDriver',
-    }
-
     # The console log is stored in two files, each should have at most half of
     # the maximum console log size.
     _MAX_CONSOLE_LOG_FILE_SIZE = units.Mi / 2
@@ -135,18 +127,8 @@ class VMOps(object):
         self._pathutils = pathutils.PathUtils()
         self._volumeops = volumeops.VolumeOps()
         self._imagecache = imagecache.ImageCache()
-        self._vif_driver = None
-        self._load_vif_driver_class()
+        self._vif_driver_cache = {}
         self._vm_log_writers = {}
-
-    def _load_vif_driver_class(self):
-        try:
-            class_name = self._vif_driver_class_map[CONF.network_api_class]
-            self._vif_driver = importutils.import_object(class_name)
-        except KeyError:
-            raise TypeError(_("VIF driver not found for "
-                              "network_api_class: %s") %
-                            CONF.network_api_class)
 
     def list_instance_uuids(self):
         instance_uuids = []
@@ -227,6 +209,13 @@ class VMOps(object):
 
         return root_vhd_path
 
+    def _get_vif_driver(self, vif_type):
+        vif_driver = self._vif_driver_cache.get(vif_type)
+        if not vif_driver:
+            vif_driver = vif_utils.get_vif_driver(vif_type)
+            self._vif_driver_cache[vif_type] = vif_driver
+        return vif_driver
+
     def _is_resize_needed(self, vhd_path, old_size, new_size, instance):
         if new_size < old_size:
             raise exception.FlavorDiskSmallerThanImage(
@@ -284,7 +273,7 @@ class VMOps(object):
 
                 self.attach_config_drive(instance, configdrive_path, vm_gen)
 
-            self.power_on(instance)
+            self.power_on(instance, network_info=network_info)
         except Exception:
             with excutils.save_and_reraise_exception():
                 self.destroy(instance)
@@ -328,7 +317,8 @@ class VMOps(object):
             self._vmutils.create_nic(instance_name,
                                      vif['id'],
                                      vif['address'])
-            self._vif_driver.plug(instance, vif)
+            vif_driver = self._get_vif_driver(vif.get('type'))
+            vif_driver.plug(instance, vif)
 
         if CONF.hyperv.enable_instance_metrics_collection:
             self._vmutils.enable_vm_metrics_collection(instance_name)
@@ -442,11 +432,7 @@ class VMOps(object):
                 # Stop the VM first.
                 self._vmutils.stop_vm_jobs(instance_name)
                 self.power_off(instance)
-
-                if network_info:
-                    for vif in network_info:
-                        self._vif_driver.unplug(instance, vif)
-
+                self.unplug_vifs(instance, network_info)
                 self._vmutils.destroy_vm(instance_name)
                 self._volumeops.disconnect_volumes(block_device_info)
             else:
@@ -465,7 +451,7 @@ class VMOps(object):
 
         if reboot_type == REBOOT_TYPE_SOFT:
             if self._soft_shutdown(instance):
-                self.power_on(instance)
+                self.power_on(instance, network_info=network_info)
                 return
 
         self._set_vm_state(instance,
@@ -553,7 +539,7 @@ class VMOps(object):
             LOG.debug("Instance not found. Skipping power off",
                       instance=instance)
 
-    def power_on(self, instance, block_device_info=None):
+    def power_on(self, instance, block_device_info=None, network_info=None):
         """Power on the specified instance."""
         LOG.debug("Power on instance", instance=instance)
 
@@ -562,6 +548,7 @@ class VMOps(object):
                                                            block_device_info)
 
         self._set_vm_state(instance, constants.HYPERV_VM_STATE_ENABLED)
+        self.post_start_vifs(instance, network_info)
 
     def _set_vm_state(self, instance, req_state):
         instance_name = instance.name
@@ -624,7 +611,7 @@ class VMOps(object):
     def resume_state_on_host_boot(self, context, instance, network_info,
                                   block_device_info=None):
         """Resume guest state when a host is booted."""
-        self.power_on(instance, block_device_info)
+        self.power_on(instance, block_device_info, network_info)
 
     def log_vm_serial_output(self, instance_name, instance_uuid):
         # Uses a 'thread' that will run in background, reading
@@ -717,6 +704,18 @@ class VMOps(object):
         for path in dvd_disk_paths:
             self._pathutils.copyfile(path, dest_path)
 
+    def unplug_vifs(self, instance, network_info):
+        if network_info:
+            for vif in network_info:
+                vif_driver = self._get_vif_driver(vif.get('type'))
+                vif_driver.unplug(instance, vif)
+
+    def post_start_vifs(self, instance, network_info):
+        if network_info:
+            for vif in network_info:
+                vif_driver = self._get_vif_driver(vif.get('type'))
+                vif_driver.post_start(instance, vif)
+
     def _check_hotplug_available(self, instance):
         """Check whether attaching an interface is possible for the given
         instance.
@@ -750,7 +749,11 @@ class VMOps(object):
 
         LOG.debug('Attaching vif: %s', vif['id'], instance=instance)
         self._vmutils.create_nic(instance.name, vif['id'], vif['address'])
-        self._vif_driver.plug(instance, vif)
+        vif_driver = self._get_vif_driver(vif.get('type'))
+        vif_driver.plug(instance, vif)
+        vm_state = self._get_vm_state(instance.name)
+        if vm_state == constants.HYPERV_VM_STATE_ENABLED:
+            vif_driver.post_start(instance, vif)
 
     def detach_interface(self, instance, vif):
         try:
@@ -759,7 +762,8 @@ class VMOps(object):
                     instance_uuid=instance.uuid)
 
             LOG.debug('Detaching vif: %s', vif['id'], instance=instance)
-            self._vif_driver.unplug(instance, vif)
+            vif_driver = self._get_vif_driver(vif.get('type'))
+            vif_driver.unplug(instance, vif)
             self._vmutils.destroy_nic(instance.name, vif['id'])
         except os_win_exc.HyperVVMNotFoundException:
             # TODO(claudiub): add set log level to error after string freeze.

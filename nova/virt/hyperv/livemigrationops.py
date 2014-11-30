@@ -80,7 +80,8 @@ class LiveMigrationOps(object):
 
         LOG.debug("Calling live migration post_method for instance: %s",
                   instance_name)
-        post_method(context, instance_ref, dest, block_migration)
+        post_method(context, instance_ref, dest, block_migration,
+                    migrate_data)
 
     @check_os_version_requirement
     def pre_live_migration(self, context, instance, block_device_info,
@@ -110,6 +111,7 @@ class LiveMigrationOps(object):
                   instance=instance_ref)
         self._vmops.log_vm_serial_output(instance_ref['name'],
                                          instance_ref['uuid'])
+        self._vmops.post_start_vifs(instance_ref, network_info)
 
     @check_os_version_requirement
     def check_can_live_migrate_destination(self, ctxt, instance_ref,
@@ -117,7 +119,16 @@ class LiveMigrationOps(object):
                                            block_migration=False,
                                            disk_over_commit=False):
         LOG.debug("check_can_live_migrate_destination called", instance_ref)
-        return migrate_data_obj.LiveMigrateData()
+        # This is a workaround to ensure that the driver cleanup method is
+        # triggered after a live migration.
+        # Cleanup is triggered either by having block-migration enabled
+        # or by setting the is_shared_instance_path flag in migrate_data
+        # set to false.
+        # The motivation for using cleanup is exposed as a comment
+        # in hyperv.nova.driver
+        mgr_obj = migrate_data_obj.HyperVLiveMigrateData()
+        mgr_obj.from_legacy_dict({'is_shared_instance_path': False})
+        return mgr_obj
 
     @check_os_version_requirement
     def check_can_live_migrate_destination_cleanup(self, ctxt,
