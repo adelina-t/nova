@@ -267,13 +267,15 @@ class VMOpsTestCase(test_base.HyperVBaseTestCase):
     @mock.patch('nova.virt.hyperv.volumeops.VolumeOps.'
                 'ebs_root_in_block_devices')
     @mock.patch('nova.virt.hyperv.vmops.VMOps._delete_disk_files')
-    def _test_spawn(self, mock_delete_disk_files,
+    @mock.patch('nova.virt.hyperv.vif.get_vif_driver')
+    def _test_spawn(self, mock_get_vif_driver, mock_delete_disk_files,
                     mock_ebs_root_in_block_devices, mock_create_root_vhd,
                     mock_create_ephemeral_vhd, mock_get_image_vm_gen,
                     mock_create_instance, mock_configdrive_required,
                     mock_create_config_drive, mock_attach_config_drive,
                     mock_power_on, mock_destroy, exists, boot_from_volume,
                     configdrive_required, fail):
+        mock_vif_driver = mock_get_vif_driver()
         mock_instance = fake_instance.fake_instance_obj(self.context)
         mock_image_meta = mock.MagicMock()
 
@@ -282,6 +284,8 @@ class VMOpsTestCase(test_base.HyperVBaseTestCase):
         fake_ephemeral_path = mock_create_ephemeral_vhd.return_value
         fake_vm_gen = mock_get_image_vm_gen.return_value
         fake_config_drive_path = mock_create_config_drive.return_value
+        fake_network_info = {'id': mock.sentinel.ID,
+                             'address': mock.sentinel.ADDRESS}
 
         self._vmops._vmutils.vm_exists.return_value = exists
         mock_ebs_root_in_block_devices.return_value = boot_from_volume
@@ -302,7 +306,7 @@ class VMOpsTestCase(test_base.HyperVBaseTestCase):
         else:
             self._vmops.spawn(self.context, mock_instance, mock_image_meta,
                               [mock.sentinel.FILE], mock.sentinel.PASSWORD,
-                              mock.sentinel.INFO, mock.sentinel.DEV_INFO)
+                              [fake_network_info], mock.sentinel.DEV_INFO)
             self._vmops._vmutils.vm_exists.assert_called_once_with(
                 mock_instance.name)
             mock_delete_disk_files.assert_called_once_with(
@@ -327,6 +331,9 @@ class VMOpsTestCase(test_base.HyperVBaseTestCase):
                 mock_attach_config_drive.assert_called_once_with(
                     mock_instance, fake_config_drive_path, fake_vm_gen)
             mock_power_on.assert_called_once_with(mock_instance)
+            mock_vif_driver.post_start.assert_called_once_with(
+                mock_instance,
+                fake_network_info)
 
     def test_spawn(self):
         self._test_spawn(exists=False, boot_from_volume=False,
@@ -358,15 +365,13 @@ class VMOpsTestCase(test_base.HyperVBaseTestCase):
                           [mock.sentinel.FILE], mock.sentinel.PASSWORD,
                           mock.sentinel.INFO, mock.sentinel.DEV_INFO)
 
+    @mock.patch('nova.virt.hyperv.vif.get_vif_driver')
     @mock.patch('nova.virt.hyperv.volumeops.VolumeOps'
                 '.attach_volumes')
-    @mock.patch.object(vmops.VMOps, '_attach_drive')
-    def _test_create_instance(self, mock_attach_drive, mock_attach_volumes,
+    def _test_create_instance(self, mock_attach_volumes, mock_get_vif_driver,
                               fake_root_path, fake_ephemeral_path,
-                              enable_instance_metrics,
-                              vm_gen=constants.VM_GEN_1):
-        mock_vif_driver = mock.MagicMock()
-        self._vmops._vif_driver = mock_vif_driver
+                              enable_instance_metrics):
+        mock_vif_driver = mock_get_vif_driver()
         self.flags(enable_instance_metrics_collection=enable_instance_metrics,
                    group='hyperv')
         fake_network_info = {'id': mock.sentinel.ID,
@@ -408,7 +413,7 @@ class VMOpsTestCase(test_base.HyperVBaseTestCase):
         self._vmops._vmutils.create_nic.assert_called_once_with(
             mock_instance.name, mock.sentinel.ID, mock.sentinel.ADDRESS)
         mock_vif_driver.plug.assert_called_once_with(mock_instance,
-                                                     fake_network_info)
+                                                         fake_network_info)
         mock_enable = self._vmops._vmutils.enable_vm_metrics_collection
         if enable_instance_metrics:
             mock_enable.assert_called_once_with(mock_instance.name)
