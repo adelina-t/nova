@@ -585,22 +585,6 @@ class VMOpsTestCase(test_base.HyperVBaseTestCase):
             mock.sentinel.FAKE_VM_NAME, vmops.SHUTDOWN_TIME_INCREMENT)
         self.assertFalse(result)
 
-    @mock.patch("__builtin__.open")
-    @mock.patch("os.path.exists")
-    def test_get_console_output_exception(self, fake_path_exists, fake_open):
-        fake_vm = mock.MagicMock()
-
-        fake_open.side_effect = vmutils.HyperVException
-        fake_path_exists.return_value = True
-        self._vmops._pathutils.get_vm_console_log_paths.return_value = (
-            mock.sentinel.fake_console_log_path,
-            mock.sentinel.fake_console_log_archived)
-
-        with mock.patch('nova.virt.hyperv.vmops.open', fake_open, create=True):
-            self.assertRaises(vmutils.HyperVException,
-                              self._vmops.get_console_output,
-                              fake_vm)
-
     def test_list_instance_uuids(self):
         fake_uuid = '4f54fb69-d3a2-45b7-bb9b-b6e6b3d893b3'
         with mock.patch.object(self._vmops._vmutils,

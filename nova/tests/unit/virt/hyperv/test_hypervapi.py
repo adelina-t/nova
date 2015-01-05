@@ -24,7 +24,6 @@ import uuid
 import mock
 import mox
 from oslo.config import cfg
-from oslo.utils import units
 
 from nova.api.metadata import base as instance_metadata
 from nova.compute import power_state
@@ -46,9 +45,9 @@ from nova.virt.hyperv import basevolumeutils
 from nova.virt.hyperv import constants
 from nova.virt.hyperv import driver as driver_hyperv
 from nova.virt.hyperv import hostutils
-from nova.virt.hyperv import ioutils
 from nova.virt.hyperv import networkutils
 from nova.virt.hyperv import pathutils
+from nova.virt.hyperv import serialconsoleops
 from nova.virt.hyperv import rdpconsoleutils
 from nova.virt.hyperv import vhdutils
 from nova.virt.hyperv import vmutils
@@ -127,15 +126,7 @@ class HyperVAPIBaseTestCase(test.NoDBTestCase):
             pass
         self.stubs.Set(time, 'sleep', fake_sleep)
 
-        class FakeIOThread(object):
-            def __init__(self, src, dest, max_bytes):
-                pass
-
-            def start(self):
-                pass
-
         self.stubs.Set(pathutils, 'PathUtils', fake.PathUtils)
-        self.stubs.Set(ioutils, 'IOThread', FakeIOThread)
         self._mox.StubOutWithMock(fake.PathUtils, 'open')
         self._mox.StubOutWithMock(fake.PathUtils, 'copyfile')
         self._mox.StubOutWithMock(fake.PathUtils, 'rmtree')
@@ -226,6 +217,13 @@ class HyperVAPIBaseTestCase(test.NoDBTestCase):
 
         self._mox.StubOutWithMock(rdpconsoleutils.RDPConsoleUtils,
                                   'get_rdp_console_port')
+
+        self._mox.StubOutWithMock(serialconsoleops.SerialConsoleOps,
+                                  'get_console_output')
+        self._mox.StubOutWithMock(serialconsoleops.SerialConsoleOps,
+                                  'start_console_handler')
+        self._mox.StubOutWithMock(serialconsoleops.SerialConsoleOps,
+                                  'stop_console_handler')
 
         self._mox.StubOutClassWithMocks(instance_metadata, 'InstanceMetadata')
         self._mox.StubOutWithMock(instance_metadata.InstanceMetadata,
@@ -337,12 +335,14 @@ class HyperVAPITestCase(HyperVAPIBaseTestCase):
         vmutils.VMUtils.set_vm_state(mox.Func(self._check_instance_name),
                                      to_state)
 
-        if to_state in (constants.HYPERV_VM_STATE_DISABLED,
-                        constants.HYPERV_VM_STATE_REBOOT):
-            self._setup_delete_vm_log_mocks()
+        if to_state != constants.HYPERV_VM_STATE_ENABLED:
+            serialconsoleops.SerialConsoleOps.stop_console_handler(
+                mox.IsA(str))
+
         if to_state in (constants.HYPERV_VM_STATE_ENABLED,
                         constants.HYPERV_VM_STATE_REBOOT):
-            self._setup_log_vm_output_mocks()
+            serialconsoleops.SerialConsoleOps.start_console_handler(
+                mox.IsA(str))
 
         self._mox.ReplayAll()
         action(self._instance_data)
@@ -407,7 +407,8 @@ class HyperVAPITestCase(HyperVAPIBaseTestCase):
             volumeops.VolumeOps.fix_instance_volume_disk_paths(
                 mox.Func(self._check_instance_name), block_device_info)
 
-        self._setup_log_vm_output_mocks()
+        serialconsoleops.SerialConsoleOps.start_console_handler(
+            mox.IsA(str))
 
         self._mox.ReplayAll()
         self._conn.power_on(self._context, self._instance_data, network_info,
@@ -427,7 +428,8 @@ class HyperVAPITestCase(HyperVAPIBaseTestCase):
         network_info = fake_network.fake_get_instance_nw_info(self.stubs)
         vmutils.VMUtils.set_vm_state(mox.Func(self._check_instance_name),
                                      constants.HYPERV_VM_STATE_ENABLED)
-        self._setup_log_vm_output_mocks()
+        serialconsoleops.SerialConsoleOps.start_console_handler(
+            mox.IsA(str))
         self._mox.ReplayAll()
         self._conn.power_on(self._context, self._instance_data, network_info)
         self._mox.VerifyAll()
@@ -437,11 +439,11 @@ class HyperVAPITestCase(HyperVAPIBaseTestCase):
         network_info = fake_network.fake_get_instance_nw_info(self.stubs)
         self._instance_data = self._get_instance_data()
 
+        serialconsoleops.SerialConsoleOps.stop_console_handler(mox.IsA(str))
         vmutils.VMUtils.set_vm_state(mox.Func(self._check_instance_name),
                                      constants.HYPERV_VM_STATE_REBOOT)
-
-        self._setup_delete_vm_log_mocks()
-        self._setup_log_vm_output_mocks()
+        serialconsoleops.SerialConsoleOps.start_console_handler(
+            mox.IsA(str))
 
         self._mox.ReplayAll()
         self._conn.reboot(self._context, self._instance_data, network_info,
@@ -455,7 +457,7 @@ class HyperVAPITestCase(HyperVAPIBaseTestCase):
         func = mox.Func(self._check_instance_name)
         vmutils.VMUtils.set_vm_state(func, constants.HYPERV_VM_STATE_DISABLED)
 
-        self._setup_delete_vm_log_mocks()
+        serialconsoleops.SerialConsoleOps.stop_console_handler(mox.IsA(str))
 
         vmutils.VMUtils.destroy_vm(func)
 
@@ -592,18 +594,6 @@ class HyperVAPITestCase(HyperVAPIBaseTestCase):
             m.AndRaise(vmutils.HyperVAuthorizationException(_(
                                                 'Simulated failure')))
 
-    def _setup_log_vm_output_mocks(self):
-        m = fake.PathUtils.get_vm_console_log_paths(mox.IsA(str))
-        m.AndReturn(('fake_vm_log_path', 'fake_vm_log_path.1'))
-        ioutils.IOThread('fake_pipe', 'fake_vm_log_path',
-                         units.Mi).start()
-
-    def _setup_delete_vm_log_mocks(self):
-        m = fake.PathUtils.get_vm_console_log_paths(mox.IsA(str))
-        m.AndReturn(('fake_vm_log_path', 'fake_vm_log_path.1'))
-        fileutils.delete_if_exists(mox.IsA(str))
-        fileutils.delete_if_exists(mox.IsA(str))
-
     def _setup_get_cached_image_mocks(self, cow=True,
                                       vhd_format=constants.DISK_FORMAT_VHD):
         m = vhdutils.VHDUtils.get_vhd_format(
@@ -699,7 +689,8 @@ class HyperVAPITestCase(HyperVAPIBaseTestCase):
         else:
             vmutils.VMUtils.set_vm_state(mox.Func(self._check_vm_name),
                                          constants.HYPERV_VM_STATE_ENABLED)
-            self._setup_log_vm_output_mocks()
+            serialconsoleops.SerialConsoleOps.start_console_handler(
+                mox.IsA(str))
 
     def _test_spawn_instance(self, cow=True,
                              expected_disks=1,
@@ -1010,7 +1001,8 @@ class HyperVAPITestCase(HyperVAPIBaseTestCase):
             vmutils.VMUtils.set_vm_state(func,
                                          constants.HYPERV_VM_STATE_DISABLED)
 
-            self._setup_delete_vm_log_mocks()
+            serialconsoleops.SerialConsoleOps.stop_console_handler(
+                mox.IsA(str))
 
             m = vmutils.VMUtils.get_vm_storage_paths(func)
             m.AndReturn(([fake_root_vhd_path], []))
@@ -1174,7 +1166,8 @@ class HyperVAPITestCase(HyperVAPIBaseTestCase):
         if power_on:
             vmutils.VMUtils.set_vm_state(mox.Func(self._check_instance_name),
                                          constants.HYPERV_VM_STATE_ENABLED)
-            self._setup_log_vm_output_mocks()
+            serialconsoleops.SerialConsoleOps.start_console_handler(
+                mox.IsA(str))
 
         if config_drive:
             self._mock_attach_config_drive(instance, config_drive_format)
@@ -1250,7 +1243,8 @@ class HyperVAPITestCase(HyperVAPIBaseTestCase):
         if power_on:
             vmutils.VMUtils.set_vm_state(mox.Func(self._check_instance_name),
                                          constants.HYPERV_VM_STATE_ENABLED)
-            self._setup_log_vm_output_mocks()
+            serialconsoleops.SerialConsoleOps.start_console_handler(
+                mox.IsA(str))
 
         if config_drive:
             self._mock_attach_config_drive(instance, config_drive_format)
