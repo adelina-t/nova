@@ -22,6 +22,8 @@ from oslo_config import cfg
 from nova import exception
 from nova.network import linux_net
 from nova.network import model as network_model
+from nova.network import net_common
+from nova.network import ovs_utils
 from nova import objects
 from nova.pci import utils as pci_utils
 from nova import test
@@ -621,11 +623,11 @@ class LibvirtVifTestCase(test.NoDBTestCase):
                                               'instance-uuid')]
         }
         with contextlib.nested(
-                mock.patch.object(linux_net, 'device_exists',
+                mock.patch.object(net_common, 'device_exists',
                                   return_value=False),
                 mock.patch.object(utils, 'execute'),
                 mock.patch.object(linux_net, '_create_veth_pair'),
-                mock.patch.object(linux_net, 'create_ovs_vif_port')
+                mock.patch.object(ovs_utils, 'create_ovs_vif_port')
         ) as (device_exists, execute, _create_veth_pair, create_ovs_vif_port):
             d = vif.LibvirtGenericVIFDriver()
             d.plug_ovs_hybrid(self.instance, self.vif_ovs)
@@ -646,10 +648,10 @@ class LibvirtVifTestCase(test.NoDBTestCase):
             'delete_ovs_vif_port': [mock.call('br0', 'qvovif-xxx-yyy')]
         }
         with contextlib.nested(
-                mock.patch.object(linux_net, 'device_exists',
+                mock.patch.object(net_common, 'device_exists',
                                   return_value=True),
                 mock.patch.object(utils, 'execute'),
-                mock.patch.object(linux_net, 'delete_ovs_vif_port')
+                mock.patch.object(ovs_utils, 'delete_ovs_vif_port')
         ) as (device_exists, execute, delete_ovs_vif_port):
             d = vif.LibvirtGenericVIFDriver()
             d.unplug_ovs_hybrid(None, self.vif_ovs)
@@ -703,9 +705,9 @@ class LibvirtVifTestCase(test.NoDBTestCase):
             'delete_ovs_vif_port': [mock.call('br0', 'qvovif-xxx-yyy')]
         }
         with contextlib.nested(
-                mock.patch.object(linux_net, 'device_exists',
+                mock.patch.object(net_common, 'device_exists',
                                   return_value=False),
-                mock.patch.object(linux_net, 'delete_ovs_vif_port')
+                mock.patch.object(ovs_utils, 'delete_ovs_vif_port')
         ) as (device_exists, delete_ovs_vif_port):
             d = vif.LibvirtGenericVIFDriver()
             d.unplug_ovs_hybrid(None, self.vif_ovs)
@@ -737,7 +739,7 @@ class LibvirtVifTestCase(test.NoDBTestCase):
                                               'instance-uuid')]
         }
         with contextlib.nested(
-                mock.patch.object(linux_net, 'device_exists',
+                mock.patch.object(net_common, 'device_exists',
                                   return_value=False),
                 mock.patch.object(utils, 'execute'),
                 mock.patch.object(linux_net, '_create_veth_pair'),
@@ -786,7 +788,7 @@ class LibvirtVifTestCase(test.NoDBTestCase):
                                       network=mynetwork)
             d.unplug_iovisor(None, myvif)
 
-    @mock.patch('nova.network.linux_net.device_exists')
+    @mock.patch('nova.network.net_common.device_exists')
     def test_plug_iovisor(self, device_exists):
         device_exists.return_value = True
         d = vif.LibvirtGenericVIFDriver()
@@ -1147,8 +1149,8 @@ class LibvirtVifTestCase(test.NoDBTestCase):
                  'ovs_set_vhostuser_port_type': [mock.call('usv-xxx-yyy-zzz')]
         }
         with contextlib.nested(
-                mock.patch.object(linux_net, 'create_ovs_vif_port'),
-                mock.patch.object(linux_net, 'ovs_set_vhostuser_port_type')
+                mock.patch.object(ovs_utils, 'create_ovs_vif_port'),
+                mock.patch.object(ovs_utils, 'ovs_set_vhostuser_port_type')
         ) as (create_ovs_vif_port, ovs_set_vhostuser_port_type):
             d = vif.LibvirtGenericVIFDriver()
             d.plug_vhostuser(self.instance, self.vif_vhostuser_ovs)
@@ -1160,7 +1162,7 @@ class LibvirtVifTestCase(test.NoDBTestCase):
         calls = {
             'delete_ovs_vif_port': [mock.call('br0', 'usv-xxx-yyy-zzz')]
         }
-        with mock.patch.object(linux_net,
+        with mock.patch.object(ovs_utils,
                                'delete_ovs_vif_port') as delete_port:
             d = vif.LibvirtGenericVIFDriver()
             d.unplug_vhostuser(None, self.vif_vhostuser_ovs)
