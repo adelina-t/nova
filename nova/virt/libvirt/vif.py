@@ -29,6 +29,8 @@ from nova.i18n import _
 from nova.i18n import _LE
 from nova.network import linux_net
 from nova.network import model as network_model
+from nova.network import net_common
+from nova.network import ovs_utils
 from nova import objects
 from nova import utils
 from nova.virt.libvirt import config as vconfig
@@ -479,7 +481,7 @@ class LibvirtGenericVIFDriver(object):
         br_name = self.get_br_name(vif['id'])
         v1_name, v2_name = self.get_veth_pair_names(vif['id'])
 
-        if not linux_net.device_exists(br_name):
+        if not net_common.device_exists(br_name):
             utils.execute('brctl', 'addbr', br_name, run_as_root=True)
             utils.execute('brctl', 'setfd', br_name, 0, run_as_root=True)
             utils.execute('brctl', 'stp', br_name, 'off', run_as_root=True)
@@ -490,12 +492,12 @@ class LibvirtGenericVIFDriver(object):
                           run_as_root=True,
                           check_exit_code=[0, 1])
 
-        if not linux_net.device_exists(v2_name):
+        if not net_common.device_exists(v2_name):
             linux_net._create_veth_pair(v1_name, v2_name)
             utils.execute('ip', 'link', 'set', br_name, 'up', run_as_root=True)
             utils.execute('brctl', 'addif', br_name, v1_name, run_as_root=True)
             if port == 'ovs':
-                linux_net.create_ovs_vif_port(self.get_bridge_name(vif),
+                ovs_utils.create_ovs_vif_port(self.get_bridge_name(vif),
                                               v2_name, iface_id,
                                               vif['address'], instance.uuid)
             elif port == 'ivs':
@@ -624,7 +626,7 @@ class LibvirtGenericVIFDriver(object):
         dev = self.get_vif_devname(vif)
         mac = vif['details'].get(network_model.VIF_DETAILS_TAP_MAC_ADDRESS)
         linux_net.create_tap_dev(dev, mac)
-        linux_net._set_device_mtu(dev)
+        net_common.set_device_mtu(dev)
 
     def plug_vhostuser(self, instance, vif):
         ovs_plug = vif['details'].get(
@@ -634,10 +636,10 @@ class LibvirtGenericVIFDriver(object):
             iface_id = self.get_ovs_interfaceid(vif)
             port_name = os.path.basename(
                     vif['details'][network_model.VIF_DETAILS_VHOSTUSER_SOCKET])
-            linux_net.create_ovs_vif_port(self.get_bridge_name(vif),
+            ovs_utils.create_ovs_vif_port(self.get_bridge_name(vif),
                                           port_name, iface_id, vif['address'],
                                           instance.uuid)
-            linux_net.ovs_set_vhostuser_port_type(port_name)
+            ovs_utils.ovs_set_vhostuser_port_type(port_name)
 
     def plug_vrouter(self, instance, vif):
         """Plug into Contrail's network port
@@ -717,7 +719,7 @@ class LibvirtGenericVIFDriver(object):
             br_name = self.get_br_name(vif['id'])
             v1_name, v2_name = self.get_veth_pair_names(vif['id'])
 
-            if linux_net.device_exists(br_name):
+            if net_common.device_exists(br_name):
                 utils.execute('brctl', 'delif', br_name, v1_name,
                               run_as_root=True)
                 utils.execute('ip', 'link', 'set', br_name, 'down',
@@ -725,7 +727,7 @@ class LibvirtGenericVIFDriver(object):
                 utils.execute('brctl', 'delbr', br_name,
                               run_as_root=True)
 
-            linux_net.delete_ovs_vif_port(self.get_bridge_name(vif),
+            ovs_utils.delete_ovs_vif_port(self.get_bridge_name(vif),
                                           v2_name)
         except processutils.ProcessExecutionError:
             LOG.exception(_LE("Failed while unplugging vif"),
@@ -810,7 +812,7 @@ class LibvirtGenericVIFDriver(object):
         try:
             utils.execute('mm-ctl', '--unbind-port', port_id,
                           run_as_root=True)
-            linux_net.delete_net_dev(dev)
+            net_common.delete_net_dev(dev)
         except processutils.ProcessExecutionError:
             LOG.exception(_LE("Failed while unplugging vif"),
                           instance=instance)
@@ -819,7 +821,7 @@ class LibvirtGenericVIFDriver(object):
         """Unplug a VIF_TYPE_TAP virtual interface."""
         dev = self.get_vif_devname(vif)
         try:
-            linux_net.delete_net_dev(dev)
+            net_common.delete_net_dev(dev)
         except processutils.ProcessExecutionError:
             LOG.exception(_LE("Failed while unplugging vif"),
                           instance=instance)
@@ -839,7 +841,7 @@ class LibvirtGenericVIFDriver(object):
                           vif['address'], run_as_root=True)
             utils.execute('ifc_ctl', 'gateway', 'del_port', dev,
                           run_as_root=True)
-            linux_net.delete_net_dev(dev)
+            net_common.delete_net_dev(dev)
         except processutils.ProcessExecutionError:
             LOG.exception(_LE("Failed while unplugging vif"),
                           instance=instance)
@@ -851,7 +853,7 @@ class LibvirtGenericVIFDriver(object):
         if ovs_plug:
             port_name = os.path.basename(
                     vif['details'][network_model.VIF_DETAILS_VHOSTUSER_SOCKET])
-            linux_net.delete_ovs_vif_port(self.get_bridge_name(vif),
+            ovs_utils.delete_ovs_vif_port(self.get_bridge_name(vif),
                                           port_name)
 
     def unplug_vrouter(self, instance, vif):
@@ -863,7 +865,7 @@ class LibvirtGenericVIFDriver(object):
         cmd_args = ("--oper=delete --uuid=%s" % (vif['id']))
         try:
             utils.execute('vrouter-port-control', cmd_args, run_as_root=True)
-            linux_net.delete_net_dev(dev)
+            net_common.delete_net_dev(dev)
         except processutils.ProcessExecutionError:
             LOG.exception(
                 _LE("Failed while unplugging vif"), instance=instance)
