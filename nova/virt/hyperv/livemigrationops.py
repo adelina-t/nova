@@ -24,6 +24,7 @@ from oslo_log import log as logging
 from oslo_utils import excutils
 
 from nova.i18n import _
+from nova.virt.hyperv import block_device_manager
 from nova.virt.hyperv import imagecache
 from nova.virt.hyperv import pathutils
 from nova.virt.hyperv import vmops
@@ -58,6 +59,7 @@ class LiveMigrationOps(object):
         self._volumeops = volumeops.VolumeOps()
         self._imagecache = imagecache.ImageCache()
         self._vmutils = utilsfactory.get_vmutils()
+        self._block_dev_man = block_device_manager.BlockDeviceInfoManager()
 
     @check_os_version_requirement
     def live_migration(self, context, instance_ref, dest, post_method,
@@ -88,7 +90,7 @@ class LiveMigrationOps(object):
         self._livemigrutils.check_live_migration_config()
 
         if CONF.use_cow_images:
-            boot_from_volume = self._volumeops.ebs_root_in_block_devices(
+            boot_from_volume = self._block_dev_man.is_boot_from_volume(
                 block_device_info)
             if not boot_from_volume and instance.image_ref:
                 self._imagecache.get_cached_image(context, instance)

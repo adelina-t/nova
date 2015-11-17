@@ -88,6 +88,9 @@ class HyperVDriverTestCase(test_base.HyperVBaseTestCase):
         self.assertRaises(exception.InstanceNotFound,
                           self.driver.get_info, mock.sentinel.instance)
 
+    def test_need_legacy_block_device_info(self):
+        self.assertFalse(self.driver.need_legacy_block_device_info)
+
     @mock.patch.object(driver.eventhandler, 'InstanceEventHandler')
     def test_init_host(self, mock_InstanceEventHandler):
         self.driver.init_host(mock.sentinel.host)

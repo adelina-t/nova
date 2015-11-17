@@ -117,6 +117,10 @@ class HyperVDriver(driver.ComputeDriver):
                           'Windows has been removed in Mitaka.'))
             raise exception.HypervisorTooOld(version='6.2')
 
+    @property
+    def need_legacy_block_device_info(self):
+        return False
+
     def init_host(self, host):
         self._vmops.restart_vm_log_writers()
         event_handler = eventhandler.InstanceEventHandler(

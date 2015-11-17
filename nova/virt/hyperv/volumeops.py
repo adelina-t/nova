@@ -34,6 +34,7 @@ from nova import exception
 from nova.i18n import _, _LE, _LW
 from nova import utils
 from nova.virt import driver
+from nova.virt.hyperv import constants
 
 LOG = logging.getLogger(__name__)
 
@@ -79,14 +80,8 @@ class VolumeOps(object):
             raise exception.VolumeDriverNotFound(driver_type=driver_type)
         return self.volume_drivers[driver_type]
 
-    def attach_volumes(self, block_device_info, instance_name, ebs_root):
-        mapping = driver.block_device_info_get_mapping(block_device_info)
-
-        if ebs_root:
-            self.attach_volume(mapping[0]['connection_info'],
-                               instance_name, True)
-            mapping = mapping[1:]
-        for vol in mapping:
+    def attach_volumes(self, volumes, instance_name):
+        for vol in volumes:
             self.attach_volume(vol['connection_info'], instance_name)
 
     def disconnect_volumes(self, block_device_info):
@@ -97,10 +92,12 @@ class VolumeOps(object):
             volume_driver = self._get_volume_driver(driver_type)
             volume_driver.disconnect_volumes(block_device_mapping)
 
-    def attach_volume(self, connection_info, instance_name, ebs_root=False):
+    def attach_volume(self, connection_info, instance_name,
+                      disk_bus=constants.CTRL_TYPE_SCSI):
         volume_driver = self._get_volume_driver(
             connection_info=connection_info)
-        volume_driver.attach_volume(connection_info, instance_name, ebs_root)
+        volume_driver.attach_volume(connection_info, instance_name,
+                                    disk_bus=disk_bus)
 
     def detach_volume(self, connection_info, instance_name):
         volume_driver = self._get_volume_driver(
@@ -220,7 +217,8 @@ class ISCSIVolumeDriver(object):
             LOG.debug("Skipping disconnecting target %s as there "
                       "are LUNs still being used.", target_iqn)
 
-    def attach_volume(self, connection_info, instance_name, ebs_root=False):
+    def attach_volume(self, connection_info, instance_name,
+                      disk_bus=constants.CTRL_TYPE_SCSI):
         """Attach a volume to the SCSI controller or to the IDE controller if
         ebs_root is True
         """
@@ -239,7 +237,7 @@ class ISCSIVolumeDriver(object):
             mounted_disk_path = self._get_mounted_disk_from_lun(target_iqn,
                                                                 target_lun)
 
-            if ebs_root:
+            if disk_bus == constants.CTRL_TYPE_IDE:
                 # Find the IDE controller for the vm.
                 ctrller_path = self._vmutils.get_vm_ide_controller(
                     instance_name, 0)
@@ -363,13 +361,14 @@ class SMBFSVolumeDriver(object):
         self._password_regex = re.compile(r'pass(?:word)?=([^, ]+)')
 
     @export_path_synchronized
-    def attach_volume(self, connection_info, instance_name, ebs_root=False):
+    def attach_volume(self, connection_info, instance_name,
+                      disk_bus=constants.CTRL_TYPE_SCSI):
         self.ensure_share_mounted(connection_info)
 
         disk_path = self._get_disk_path(connection_info)
 
         try:
-            if ebs_root:
+            if disk_bus == constants.CTRL_TYPE_IDE:
                 ctrller_path = self._vmutils.get_vm_ide_controller(
                     instance_name, 0)
                 slot = 0

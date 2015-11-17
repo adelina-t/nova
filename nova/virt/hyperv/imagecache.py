@@ -91,41 +91,47 @@ class ImageCache(object):
     def get_cached_image(self, context, instance):
         image_id = instance.image_ref
 
-        base_vhd_dir = self._pathutils.get_base_vhd_dir()
-        base_vhd_path = os.path.join(base_vhd_dir, image_id)
+        image_type = instance.system_metadata['image_disk_format']
 
-        @utils.synchronized(base_vhd_path)
+        base_image_dir = self._pathutils.get_base_vhd_dir()
+        base_image_path = os.path.join(base_image_dir, image_id)
+
+        @utils.synchronized(base_image_path)
         def fetch_image_if_not_existing():
-            vhd_path = None
-            for format_ext in ['vhd', 'vhdx']:
-                test_path = base_vhd_path + '.' + format_ext
+            image_path = None
+            for format_ext in ['vhd', 'vhdx', 'iso']:
+                test_path = base_image_path + '.' + format_ext
                 if self._pathutils.exists(test_path):
-                    vhd_path = test_path
+                    image_path = test_path
                     break
 
-            if not vhd_path:
+            if not image_path:
                 try:
-                    images.fetch(context, image_id, base_vhd_path,
+                    images.fetch(context, image_id, base_image_path,
                                  instance.user_id,
                                  instance.project_id)
-
-                    format_ext = self._vhdutils.get_vhd_format(base_vhd_path)
-                    vhd_path = base_vhd_path + '.' + format_ext.lower()
-                    self._pathutils.rename(base_vhd_path, vhd_path)
+                    if image_type == 'iso':
+                        format_ext = 'iso'
+                    else:
+                        format_ext = self._vhdutils.get_vhd_format(
+                            base_image_path)
+                    image_path = base_image_path + '.' + format_ext.lower()
+                    self._pathutils.rename(base_image_path, image_path)
                 except Exception:
                     with excutils.save_and_reraise_exception():
-                        if self._pathutils.exists(base_vhd_path):
-                            self._pathutils.remove(base_vhd_path)
+                        if self._pathutils.exists(base_image_path):
+                            self._pathutils.remove(base_image_path)
 
-            return vhd_path
+            return image_path
 
-        vhd_path = fetch_image_if_not_existing()
+        image_path = fetch_image_if_not_existing()
 
-        if CONF.use_cow_images and vhd_path.split('.')[-1].lower() == 'vhd':
+        if CONF.use_cow_images and image_path.split('.')[-1].lower() == 'vhd':
             # Resize the base VHD image as it's not possible to resize a
             # differencing VHD. This does not apply to VHDX images.
-            resized_vhd_path = self._resize_and_cache_vhd(instance, vhd_path)
-            if resized_vhd_path:
-                return resized_vhd_path
+            resized_image_path = self._resize_and_cache_vhd(instance,
+                                                            image_path)
+            if resized_image_path:
+                return resized_image_path
 
-        return vhd_path
+        return image_path
